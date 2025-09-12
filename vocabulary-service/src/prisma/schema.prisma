@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model levels {
+  level_id   String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  level_name String  @db.VarChar(10)
+  words      words[]
+
+  @@index([level_name], map: "idx_levels_level_name")
+}
+
+model pos_tags {
+  pos_tag_id String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pos_tag    String     @db.VarChar(50)
+  word_pos   word_pos[]
+
+  @@index([pos_tag], map: "idx_pos_tags_pos_tag")
+}
+
+model word_pos {
+  word_pos_id String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  word_id     String?   @db.Uuid
+  pos_tag_id  String?   @db.Uuid
+  pos_tags    pos_tags? @relation(fields: [pos_tag_id], references: [pos_tag_id], onDelete: Cascade, onUpdate: NoAction)
+  words       words?    @relation(fields: [word_id], references: [word_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([pos_tag_id], map: "idx_word_pos_pos_tag")
+  @@index([word_id], map: "idx_word_pos_word")
+}
+
+model words {
+  word_id    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  word       String     @unique(map: "idx_words_word")
+  phonetic   String?
+  meaning_vi String?
+  level_id   String?    @db.Uuid
+  audio      String?
+  word_pos   word_pos[]
+  levels     levels?    @relation(fields: [level_id], references: [level_id], onUpdate: NoAction)
+
+  @@index([level_id], map: "idx_words_level")
+}
