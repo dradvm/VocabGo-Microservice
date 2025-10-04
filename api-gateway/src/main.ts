@@ -9,16 +9,13 @@ async function bootstrap() {
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   app.use(morgan('dev'));
-  app.use(JwtVerifyMiddleware(process.env.JWT_SECRET));
+  // app.use(JwtVerifyMiddleware(process.env.JWT_SECRET));
   app.use('/auth', ProxyMiddleware('http://localhost:3001'));
   app.use('/hello', (req, res) => {
-    res.send('Hello from API Gateway');
+    res.send({ message: 'Hello from API Gateway' });
   });
-  // Route tới User Service
-  app.use('/user', ProxyMiddleware('http://localhost:3002'));
-
-  // Route tới Order Service
-  app.use('/order', ProxyMiddleware('http://localhost:3003'));
+  app.use('/vocabulary', ProxyMiddleware('http://localhost:3002'));
+  app.use('/translate', ProxyMiddleware('http://localhost:3003'));
 
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }

@@ -13,6 +13,11 @@ export class AuthController {
     @Inject('GOOGLE_OAUTH_CLIENT') private readonly googleClient: OAuth2Client
   ) {}
 
+  @Get('')
+  hello() {
+    return 'Hello';
+  }
+
   @Post('google-login')
   async googleLogin(
     @Body('idToken') idToken: string,
@@ -29,7 +34,6 @@ export class AuthController {
     if (!payload) {
       return { status: 'error', message: 'Invalid ID token' };
     }
-
     let user = await this.authService.isAuthUserExist({
       email: payload.email!
     });
@@ -145,7 +149,6 @@ export class AuthController {
 
   @Post('refresh-token')
   async refreshToken(@Body('refreshToken') refreshToken: string) {
-    console.log('refresh');
     return this.authService.grantNewToken(refreshToken);
   }
 }

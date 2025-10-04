@@ -8,9 +8,9 @@ datasource db {
 }
 
 model levels {
-  level_id   String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  level_name String  @db.VarChar(10)
-  words      words[]
+  level_id   String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  level_name String     @db.VarChar(10)
+  word_pos   word_pos[]
 
   @@index([level_name], map: "idx_levels_level_name")
 }
@@ -24,11 +24,16 @@ model pos_tags {
 }
 
 model word_pos {
-  word_pos_id String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  word_id     String?   @db.Uuid
-  pos_tag_id  String?   @db.Uuid
-  pos_tags    pos_tags? @relation(fields: [pos_tag_id], references: [pos_tag_id], onDelete: Cascade, onUpdate: NoAction)
-  words       words?    @relation(fields: [word_id], references: [word_id], onDelete: Cascade, onUpdate: NoAction)
+  word_pos_id       String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  word_id           String?             @db.Uuid
+  pos_tag_id        String?             @db.Uuid
+  definition        String?
+  level_id          String?             @db.Uuid
+  category_word_pos category_word_pos[]
+  word_example      word_example[]
+  levels            levels?             @relation(fields: [level_id], references: [level_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_words_pos_level")
+  pos_tags          pos_tags?           @relation(fields: [pos_tag_id], references: [pos_tag_id], onDelete: Cascade, onUpdate: NoAction)
+  words             words?              @relation(fields: [word_id], references: [word_id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([pos_tag_id], map: "idx_word_pos_pos_tag")
   @@index([word_id], map: "idx_word_pos_word")
@@ -39,10 +44,31 @@ model words {
   word       String     @unique(map: "idx_words_word")
   phonetic   String?
   meaning_vi String?
-  level_id   String?    @db.Uuid
   audio      String?
   word_pos   word_pos[]
-  levels     levels?    @relation(fields: [level_id], references: [level_id], onUpdate: NoAction)
+}
 
-  @@index([level_id], map: "idx_words_level")
+model word_example {
+  word_example_id String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  example         String
+  example_vi      String?
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  word_pos_id     String?   @db.Uuid
+  word_pos        word_pos? @relation(fields: [word_pos_id], references: [word_pos_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_word_example_word_pos")
+}
+
+model categories {
+  category_id       String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  category_name     String              @db.VarChar(100)
+  category_word_pos category_word_pos[]
+}
+
+model category_word_pos {
+  id          String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  category_id String     @db.Uuid
+  word_pos_id String     @db.Uuid
+  categories  categories @relation(fields: [category_id], references: [category_id], onDelete: Cascade, onUpdate: NoAction)
+  word_pos    word_pos   @relation(fields: [word_pos_id], references: [word_pos_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([category_id, word_pos_id])
 }

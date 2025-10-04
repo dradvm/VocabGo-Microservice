@@ -24,13 +24,12 @@
     "prisma:pull": "prisma db pull --schema=src/prisma/schema.prisma"
   },
   "dependencies": {
+    "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@prisma/client": "^6.16.1",
-    "@translated/lara": "^1.6.5",
-    "axios": "^1.12.0",
     "csv-parse": "^6.1.0",
     "dotenv": "^17.2.2",
     "morgan": "^1.10.1",
