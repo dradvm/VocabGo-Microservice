@@ -7,6 +7,6 @@ async function bootstrap() {
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   app.use(morgan('dev'));
-  await app.listen(process.env.PORT ?? 3002, '0.0.0.0');
+  await app.listen(3002);
 }
 bootstrap();

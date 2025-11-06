@@ -1,8 +1,17 @@
-import { Body, Controller, Get, Inject, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  Post,
+  Req,
+  Res
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { OAuth2Client } from 'google-auth-library';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { auth_sessions } from '@prisma/client';
 
 @Controller('')
@@ -99,13 +108,24 @@ export class AuthController {
         );
       }
 
+      console.log({
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken
+      });
+      await this.prisma.auth_users.update({
+        where: { id: user.id },
+        data: { last_login_at: new Date() }
+      });
       return {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken
       };
     } else {
       const results = await this.prisma.$transaction(async () => {
-        user = await this.authService.createAuthUser({ email: payload.email! });
+        user = await this.authService.createAuthUser(
+          { email: payload.email! },
+          payload
+        );
         await this.authService.createAuthProvider({
           auth_user_id: user.id,
           provider: 'google',
@@ -143,12 +163,58 @@ export class AuthController {
           refreshToken: newRefreshToken
         };
       });
+      console.log(results);
       return results;
     }
   }
 
+  @Post('admin')
+  async createAdminAccount(
+    @Body('username') username: string,
+    @Body('password') password: string,
+    @Body('email') email?: string
+  ) {
+    return this.authService.createAdminAccount(username, password, email);
+  }
+  @Post('admin/login')
+  async loginAdmin(
+    @Body('username') username: string,
+    @Body('password') password: string,
+    @Res() res: Response
+  ) {
+    const token = await this.authService.loginAdmin(username, password);
+    console.log(token);
+    res.cookie('refreshToken', token.refreshToken, {
+      httpOnly: true,
+      secure: true, // bật khi dùng https
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
+    });
+    return res.json({
+      accessToken: token.accessToken
+    });
+  }
+
   @Post('refresh-token')
-  async refreshToken(@Body('refreshToken') refreshToken: string) {
+  async refreshToken(
+    @Req() req: Request,
+    @Body('refreshToken') refreshTokenFromBody?: string,
+    @Headers('x-platform') platform?: string
+  ) {
+    let refreshToken: string;
+
+    if (platform === 'mobile' && refreshTokenFromBody) {
+      refreshToken = refreshTokenFromBody;
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      refreshToken = req.cookies['refreshToken'];
+    }
+
     return this.authService.grantNewToken(refreshToken);
+  }
+  @Post('logout')
+  async logout(@Body('refreshToken') refreshToken: string) {
+    return this.authService.logout(refreshToken);
   }
 }

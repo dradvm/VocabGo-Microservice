@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package user;
+
+
+service UserService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc CheckEnergy(CheckEnergyRequest) returns (CheckEnergyResponse);
+}
+
+message CreateUserRequest {
+  string userId = 1;
+  string avatarUrl = 2;
+  string givenName = 3;
+  string familyName = 4;
+  string email = 5;
+}
+
+message CreateUserResponse {
+  bool status = 1;
+}
+
+message CheckEnergyRequest {
+  string userId = 1;
+}
+
+message CheckEnergyResponse {
+  bool hasEnergy = 1;
+}

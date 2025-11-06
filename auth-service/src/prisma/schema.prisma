@@ -7,20 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model auth_logs {
-  id           BigInt      @id @default(autoincrement())
-  auth_user_id String?     @db.Uuid
-  action       String      @db.VarChar(50)
-  ip_address   String?     @db.Inet
-  device_info  String?     @db.VarChar(255)
-  metadata     Json?
-  created_at   DateTime?   @default(now()) @db.Timestamptz(6)
-  auth_users   auth_users? @relation(fields: [auth_user_id], references: [id], onUpdate: NoAction)
-
-  @@index([created_at], map: "idx_auth_logs_created_at")
-  @@index([auth_user_id], map: "idx_auth_logs_user")
-}
-
 model auth_providers {
   id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   auth_user_id     String     @db.Uuid
@@ -42,7 +28,7 @@ model auth_sessions {
   device_info   String?    @db.VarChar(255)
   user_agent    String?
   ip_address    String?    @db.Inet
-  refresh_token String
+  refresh_token String     @unique(map: "unique_refresh_token")
   is_revoked    Boolean?   @default(false)
   expires_at    DateTime   @db.Timestamptz(6)
   created_at    DateTime?  @default(now()) @db.Timestamptz(6)
@@ -63,7 +49,6 @@ model auth_users {
   created_at     DateTime?        @default(now()) @db.Timestamptz(6)
   updated_at     DateTime?        @default(now()) @db.Timestamptz(6)
   last_login_at  DateTime?        @db.Timestamptz(6)
-  auth_logs      auth_logs[]
   auth_providers auth_providers[]
   auth_sessions  auth_sessions[]
 

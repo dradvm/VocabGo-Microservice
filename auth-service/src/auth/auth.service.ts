@@ -1,19 +1,43 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import {
+  HttpException,
+  Inject,
+  Injectable,
+  OnModuleInit
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { ClientGrpc } from '@nestjs/microservices';
 import { auth_providers, auth_sessions, auth_users } from '@prisma/client';
+import { TokenPayload } from 'google-auth-library';
 import { StringValue } from 'ms';
 import * as ms from 'ms';
+import { Observable } from 'rxjs';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PayloadToken } from 'src/types/payloadToken';
-
+import bcrypt from 'bcrypt';
+import { compareToken, hashToken } from 'src/utils/bcrypt';
+interface UserService {
+  createUser(data: {
+    userId: string;
+    avatarUrl: string;
+    givenName: string;
+    familyName: string;
+    email: string;
+  }): Observable<{ status: boolean }>;
+}
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
+  private userService: UserService;
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    @Inject('USER_GRPC_SERVICE') private userClientGrpc: ClientGrpc
   ) {}
+  onModuleInit() {
+    this.userService =
+      this.userClientGrpc.getService<UserService>('UserService');
+  }
 
   async isAuthUserExist(payload: {
     email: string;
@@ -45,10 +69,31 @@ export class AuthService {
     });
   }
 
-  async createAuthUser(payload: { email: string }): Promise<auth_users> {
-    return await this.prisma.auth_users.create({
+  async createAuthUser(
+    payload: { email: string },
+    tokenPayload: TokenPayload
+  ): Promise<auth_users> {
+    const auth_user = await this.prisma.auth_users.create({
       data: { primary_email: payload.email }
     });
+    if (
+      tokenPayload.picture &&
+      tokenPayload.given_name &&
+      tokenPayload.family_name &&
+      tokenPayload.email
+    ) {
+      this.userService
+        .createUser({
+          userId: auth_user.id,
+          avatarUrl: tokenPayload.picture,
+          givenName: tokenPayload.given_name,
+          familyName: tokenPayload.family_name,
+          email: tokenPayload.email
+        })
+        .subscribe();
+    }
+
+    return auth_user;
   }
 
   async createAuthProvider(payload: {
@@ -165,8 +210,91 @@ export class AuthService {
       return { accessToken: newAccessToken };
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (e) {
+      await this.logout(refresh_token);
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument
       throw new HttpException(e.message, 403);
     }
+  }
+
+  async createAdminAccount(username: string, password: string, email?: string) {
+    // 1️⃣ Kiểm tra trùng username hoặc email
+    const existingUser = await this.prisma.auth_users.findFirst({
+      where: {
+        OR: [{ username }, { primary_email: email ?? undefined }]
+      }
+    });
+
+    if (existingUser) {
+      throw new Error('Username hoặc email đã tồn tại');
+    }
+
+    // 2️⃣ Băm mật khẩu
+    const passwordHash = await hashToken(password.toString());
+
+    // 3️⃣ Tạo tài khoản admin
+    const newAdmin = await this.prisma.auth_users.create({
+      data: {
+        username,
+        primary_email: email || null,
+        password_hash: passwordHash,
+        role: 'admin',
+        status: 'active'
+      }
+    });
+
+    return newAdmin;
+  }
+
+  async loginAdmin(username: string, password: string) {
+    const user = await this.prisma.auth_users.findUnique({
+      where: { username: username }
+    });
+
+    if (!user) {
+      throw new HttpException('User not found', 404);
+    }
+    if (
+      (await compareToken(password.toString(), user.password_hash!)) === false
+    ) {
+      throw new HttpException('Password not correct', 401);
+    }
+    if (user.role !== 'admin') {
+      throw new HttpException('Access denied', 403);
+    }
+    if (user.status !== 'active') {
+      throw new HttpException('User is not active', 403);
+    }
+    await this.prisma.auth_users.update({
+      where: { id: user.id },
+      data: { last_login_at: new Date() }
+    });
+    const payloadToken: PayloadToken = {
+      sub: user.id,
+      role: user.role,
+      status: user.status
+    };
+
+    const newAccessToken = this.getToken('ACCESS', payloadToken);
+    const newRefreshToken = this.getToken('REFRESH', payloadToken);
+
+    return {
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken
+    };
+  }
+
+  async logout(refreshToken: string) {
+    const session = await this.prisma.auth_sessions.findUnique({
+      where: { refresh_token: refreshToken }
+    });
+
+    if (!session) return;
+
+    await this.prisma.auth_sessions.updateMany({
+      where: { auth_user_id: session.auth_user_id },
+      data: {
+        is_revoked: true
+      }
+    });
   }
 }

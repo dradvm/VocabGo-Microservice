@@ -8,9 +8,10 @@ datasource db {
 }
 
 model levels {
-  level_id   String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  level_name String     @db.VarChar(10)
-  word_pos   word_pos[]
+  level_id    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  level_name  String     @db.VarChar(10)
+  level_title String?
+  word_pos    word_pos[]
 
   @@index([level_name], map: "idx_levels_level_name")
 }
@@ -29,6 +30,8 @@ model word_pos {
   pos_tag_id        String?             @db.Uuid
   definition        String?
   level_id          String?             @db.Uuid
+  image             String?
+  public_image_id   String?
   category_word_pos category_word_pos[]
   word_example      word_example[]
   levels            levels?             @relation(fields: [level_id], references: [level_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_words_pos_level")
@@ -37,6 +40,7 @@ model word_pos {
 
   @@index([pos_tag_id], map: "idx_word_pos_pos_tag")
   @@index([word_id], map: "idx_word_pos_word")
+  @@index([public_image_id], map: "idx_word_pos_public_image_id")
 }
 
 model words {
@@ -45,6 +49,7 @@ model words {
   phonetic   String?
   meaning_vi String?
   audio      String?
+  public_id  String?    @db.VarChar(255)
   word_pos   word_pos[]
 }
 

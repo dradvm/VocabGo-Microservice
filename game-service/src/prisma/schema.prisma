@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model difficulty {
+  difficulty_id    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  difficulty_name  String     @db.VarChar(50)
+  difficulty_score Int
+  question         question[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model game_level {
+  game_level_id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  game_level_name        String  @db.VarChar(100)
+  level_order            Int
+  game_level_description String?
+  stage                  stage[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model lesson {
+  lesson_id       String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lesson_name     String            @db.VarChar(100)
+  lesson_order    Int
+  lesson_reward   Int?              @default(0)
+  stage_id        String            @db.Uuid
+  lesson_type_id  String            @db.Uuid
+  lesson_type     lesson_type       @relation(fields: [lesson_type_id], references: [lesson_type_id], onDelete: NoAction, onUpdate: NoAction)
+  stage           stage             @relation(fields: [stage_id], references: [stage_id], onDelete: Cascade, onUpdate: NoAction)
+  lesson_question lesson_question[]
+}
+
+model lesson_question {
+  lesson_id      String   @db.Uuid
+  question_id    String   @db.Uuid
+  question_count Int?
+  lesson         lesson   @relation(fields: [lesson_id], references: [lesson_id], onDelete: Cascade, onUpdate: NoAction)
+  question       question @relation(fields: [question_id], references: [question_id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([lesson_id, question_id])
+}
+
+model lesson_type {
+  lesson_type_id   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lesson_type_name String   @db.VarChar(100)
+  lesson           lesson[]
+}
+
+model question {
+  question_id     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  question_name   String            @db.VarChar(100)
+  difficulty_id   String            @db.Uuid
+  lesson_question lesson_question[]
+  difficulty      difficulty        @relation(fields: [difficulty_id], references: [difficulty_id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model stage {
+  stage_id      String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stage_name    String       @db.VarChar(100)
+  stage_order   Int
+  is_active     Boolean?     @default(true)
+  game_level_id String       @db.Uuid
+  lesson        lesson[]
+  game_level    game_level   @relation(fields: [game_level_id], references: [game_level_id], onDelete: Cascade, onUpdate: NoAction)
+  stage_word    stage_word[]
+}
+
+model stage_word {
+  game_stage_word_id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stage_id           String @db.Uuid
+  word_pos_id        String @db.Uuid
+  stage              stage  @relation(fields: [stage_id], references: [stage_id], onDelete: Cascade, onUpdate: NoAction)
+}

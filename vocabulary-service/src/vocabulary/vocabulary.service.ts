@@ -3,15 +3,15 @@ import { parse } from 'csv-parse/sync';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-
-interface CsvRow {
-  headword?: string;
-  pos?: string;
-  CEFR?: string;
-  category1?: string;
-  category2?: string;
-  category3?: string;
-}
+import { Prisma } from '@prisma/client';
+import * as FormData from 'form-data';
+import {
+  WordRequest,
+  WordPos,
+  CsvRow,
+  AudioCloudinary,
+  ImageCloudinary
+} from 'types/word';
 
 @Injectable()
 export class VocabularyService {
@@ -46,27 +46,27 @@ export class VocabularyService {
             ?.definitions ?? [];
         if (wordPos?.length > 0) {
           definition = wordPos[0].definition ?? '';
-          examples = (
-            data.meanings?.flatMap((meaning) =>
-              meaning.definitions
-                ?.filter(
-                  (def) =>
-                    typeof def.example === 'string' &&
-                    def.example.includes(word) &&
-                    !def.example.includes(';') &&
-                    !def.example.includes('/') &&
-                    def.example.length <= 70
-                )
-                .map((def) =>
-                  typeof def.example === 'string'
-                    ? def.example
-                        .split(' ')
-                        .map((item) => item.trim())
-                        .join(' ')
-                    : ''
-                )
-            ) ?? []
-          ).filter((ex): ex is string => typeof ex === 'string');
+          examples = wordPos
+            ?.filter(
+              (def) =>
+                typeof def.example === 'string' &&
+                def.example.includes(word) &&
+                !def.example.includes(';') &&
+                !def.example.includes('/') &&
+                !def.example.includes('-') &&
+                !def.example.includes('–') &&
+                !def.example.includes('—') &&
+                !def.example.includes('−') &&
+                def.example.length <= 70
+            )
+            .map((def) =>
+              typeof def.example === 'string'
+                ? def.example
+                    .split(' ')
+                    .map((item) => item.trim())
+                    .join(' ')
+                : ''
+            );
         }
       }
       return { definition, examples };
@@ -125,7 +125,7 @@ export class VocabularyService {
           translatedText: string;
           status: boolean;
           message: string;
-        }>(`http://127.0.0.1:3000/translate`, {
+        }>(`http://127.0.0.1:4000/translate`, {
           text: word,
           to: 'vi'
         })
@@ -139,7 +139,6 @@ export class VocabularyService {
     }
     return '';
   }
-
   async importCsv(file: Express.Multer.File) {
     const text = file.buffer.toString('utf-8');
     const rows: CsvRow[] = parse(text, {
@@ -160,6 +159,7 @@ export class VocabularyService {
     const categoryMap = new Map(
       categoriesDb.map((c) => [c.category_name, c.category_id])
     );
+
     for (const row of rows) {
       const headword = row.headword?.trim();
 
@@ -220,14 +220,15 @@ export class VocabularyService {
         example_vi: string;
         word_pos_id: string;
       }[] = [];
-
       for (const example of data.examples) {
         const example_vi = await this.translateToVi(example);
         await this.delay(300);
         if (
           example.length <= 70 &&
           example_vi.length <= 70 &&
-          example.toLowerCase() != example_vi.toLowerCase()
+          example.toLowerCase() != example_vi.toLowerCase() &&
+          example.length &&
+          example_vi.length
         ) {
           examples.push({
             example: example,
@@ -398,21 +399,461 @@ export class VocabularyService {
     return wd;
   }
 
-  async saveExamples(wordId: string, examples: string[]) {
-    const data: { en: string; vi: string }[] = [];
-    for (const example of examples) {
-      const vi = await this.translateToVi(example);
-      await this.delay(300);
-      if (vi.length <= 70) data.push({ en: example, vi });
+  async getLevels() {
+    return this.prisma.levels.findMany({
+      orderBy: {
+        level_name: 'asc'
+      }
+    });
+  }
+
+  async getPosTags() {
+    return this.prisma.pos_tags.findMany({
+      orderBy: {
+        pos_tag: 'asc'
+      }
+    });
+  }
+
+  async getCategories() {
+    return this.prisma.categories.findMany({
+      orderBy: {
+        category_name: 'asc'
+      }
+    });
+  }
+
+  async getWordsByWordPosIds(wordPosIds: string[]) {
+    if (wordPosIds.length == 0) {
+      return null;
     }
-    if (data.length > 0) {
-      await this.prisma.word_example.createMany({
-        data: data.map((e) => ({
-          word_id: wordId,
-          example: e.en,
-          example_vi: e.vi
-        }))
+    return this.prisma.words.findMany({
+      where: {
+        word_pos: {
+          some: {
+            word_pos_id: {
+              in: wordPosIds
+            }
+          }
+        }
+      },
+      include: {
+        word_pos: {
+          include: {
+            word_example: true,
+            levels: true,
+            pos_tags: true
+          }
+        }
+      }
+    });
+  }
+
+  async getWords(page: number = 0, limit: number = 10, search: string = '') {
+    const skip = page * limit;
+
+    // Tạo điều kiện tìm kiếm
+    const where = search
+      ? {
+          OR: [
+            { word: { contains: search, mode: Prisma.QueryMode.insensitive } }, // tìm trong trường "word"
+            {
+              meaning_vi: {
+                contains: search,
+                mode: Prisma.QueryMode.insensitive
+              }
+            } // nếu có trường "meaning"
+          ]
+        }
+      : {};
+
+    // Chạy song song để lấy danh sách và tổng số kết quả
+    const [data, total] = await Promise.all([
+      this.prisma.words.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { word: 'asc' }, // sắp xếp mới nhất lên đầu
+        include: {
+          word_pos: {
+            include: {
+              pos_tags: true,
+              levels: true
+            },
+            orderBy: {
+              levels: {
+                level_name: 'asc'
+              }
+            }
+          }
+        }
+      }),
+      this.prisma.words.count({ where })
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+  async saveAudio(
+    file: Express.Multer.File,
+    accessToken: string
+  ): Promise<AudioCloudinary> {
+    try {
+      const formData = new FormData();
+      formData.append('file', file.buffer, {
+        filename: file.originalname,
+        contentType: file.mimetype
+      });
+
+      const { data } = await firstValueFrom(
+        this.http.post(
+          'http://localhost:4000/cloudinary/upload-audio',
+          formData,
+          {
+            headers: {
+              ...formData.getHeaders(),
+              Authorization: `Bearer ${accessToken}`
+            }
+          }
+        )
+      );
+
+      return data.data as AudioCloudinary;
+    } catch (error) {
+      console.error('Error uploading audio:', error);
+      throw new Error('Upload audio failed');
+    }
+  }
+
+  async saveImages(
+    files: Express.Multer.File[],
+    accessToken: string,
+    folder?: string
+  ): Promise<ImageCloudinary[]> {
+    try {
+      const formData = new FormData();
+      files.forEach((file) => {
+        formData.append('files', file.buffer, {
+          filename: file.originalname,
+          contentType: file.mimetype
+        });
+      });
+      if (folder) formData.append('folder', folder);
+
+      const { data } = await firstValueFrom(
+        this.http.post(
+          'http://localhost:4000/cloudinary/upload-images',
+          formData,
+          {
+            headers: {
+              ...formData.getHeaders(),
+              Authorization: `Bearer ${accessToken}`
+            }
+          }
+        )
+      );
+
+      return data.data as ImageCloudinary[];
+    } catch (error) {
+      console.error('Error uploading images:', error);
+      throw new Error('Upload images failed');
+    }
+  }
+  async deleteAudio(publicId: string, accessToken: string) {
+    try {
+      const { data } = await firstValueFrom(
+        this.http.delete('http://localhost:4000/cloudinary/delete-audio', {
+          params: { publicId },
+          headers: { Authorization: `Bearer ${accessToken}` }
+        })
+      );
+      return data;
+    } catch (error) {
+      console.error('Error deleting audio:', error);
+      throw new Error('Delete audio failed');
+    }
+  }
+
+  async deleteImages(publicIds: string[], accessToken: string) {
+    try {
+      const { data } = await firstValueFrom(
+        this.http.delete('http://localhost:4000/cloudinary/delete-images', {
+          data: { publicIds },
+          headers: { Authorization: `Bearer ${accessToken}` }
+        })
+      );
+      return data;
+    } catch (error) {
+      console.error('Error deleting images:', error);
+      throw new Error('Delete images failed');
+    }
+  }
+  async addWord(
+    wordReq: WordRequest,
+    audioRes: AudioCloudinary,
+    imageRes: ImageCloudinary[]
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const wordPosArr: WordPos[] = JSON.parse(wordReq.word_pos);
+    if (
+      imageRes.length > 0 &&
+      wordReq.word_pos_image_metadata_index != undefined
+    ) {
+      imageRes.forEach((img, i) => {
+        const idx = parseInt(
+          wordReq.word_pos_image_metadata_index?.[i] ?? '-1'
+        );
+        if (idx >= 0 && wordPosArr[idx]) {
+          wordPosArr[idx].imageUrl = img;
+        }
       });
     }
+    console.log(wordPosArr);
+    const result = await this.prisma.$transaction(async (tx) => {
+      const createdWord = await tx.words.create({
+        data: {
+          word: wordReq.word,
+          meaning_vi: wordReq.meaning_vi,
+          phonetic: wordReq.phonetic,
+          audio: audioRes.secure_url,
+          public_id: audioRes.public_id,
+          word_pos: {
+            create: wordPosArr.map((wordPos) => ({
+              level_id: wordPos.level,
+              pos_tag_id: wordPos.pos_tag,
+              definition: wordPos.definition,
+              word_example: {
+                createMany: {
+                  data: wordPos.examples.map((example) => ({
+                    example: example.en,
+                    example_vi: example.vi
+                  }))
+                }
+              },
+              image: wordPos.imageUrl?.secure_url ?? null,
+              public_image_id: wordPos.imageUrl?.public_id ?? null
+            }))
+          }
+        },
+        include: {
+          word_pos: true
+        }
+      });
+
+      const categoryData = createdWord.word_pos.flatMap((wp, index) =>
+        wordPosArr[index].categories.map((category_id) => ({
+          word_pos_id: wp.word_pos_id,
+          category_id
+        }))
+      );
+
+      if (categoryData.length > 0) {
+        await tx.category_word_pos.createMany({
+          data: categoryData
+        });
+      }
+
+      return createdWord;
+    });
+    return result;
+  }
+  async updateWord(
+    wordId: string,
+    wordReq: WordRequest,
+    audioRes: AudioCloudinary | null,
+    imageRes: AudioCloudinary[],
+    token: string
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const wordPosArr: WordPos[] = JSON.parse(wordReq.word_pos);
+    const [oldWordPos, newWordPos] = [
+      wordPosArr.filter((wp) => wp.word_pos_id),
+      wordPosArr.filter((wp) => !wp.word_pos_id)
+    ];
+    // return 'A';
+    return this.prisma.$transaction(async (tx) => {
+      const keepIds = oldWordPos.map((wp) => wp.word_pos_id!).filter(Boolean);
+      if (oldWordPos.length) {
+        const deleteWordPos = await tx.word_pos.findMany({
+          where: {
+            word_id: wordId,
+            word_pos_id: { notIn: keepIds.length ? keepIds : undefined }
+          }
+        });
+        if (deleteWordPos.length) {
+          const deleteImages = deleteWordPos
+            .map((wp) => wp.public_image_id)
+            .filter((image) => image != null);
+          if (deleteImages.length) {
+            await this.deleteImages(
+              deleteWordPos
+                .map((wp) => wp.public_image_id)
+                .filter((image) => image != null),
+              token
+            );
+          }
+
+          await tx.word_pos.deleteMany({
+            where: { word_pos_id: { notIn: keepIds } }
+          });
+        }
+      }
+
+      if (
+        imageRes.length &&
+        wordReq.word_pos_image_metadata_index != undefined
+      ) {
+        imageRes.forEach((img, i) => {
+          const idx = parseInt(
+            wordReq.word_pos_image_metadata_index?.[i] ?? '-1'
+          );
+          if (idx >= 0 && wordPosArr[idx]) wordPosArr[idx].imageUrl = img;
+        });
+      }
+
+      await Promise.all(
+        oldWordPos.map(async (wp) => {
+          await tx.category_word_pos.deleteMany({
+            where: { word_pos_id: wp.word_pos_id }
+          });
+          await tx.word_example.deleteMany({
+            where: {
+              word_pos_id: wp.word_pos_id
+            }
+          });
+          await tx.word_pos.update({
+            where: { word_pos_id: wp.word_pos_id },
+            data: {
+              level_id: wp.level,
+              pos_tag_id: wp.pos_tag,
+              definition: wp.definition,
+              word_example: {
+                createMany: {
+                  data: wp.examples.map((e) => ({
+                    example: e.en,
+                    example_vi: e.vi
+                  }))
+                }
+              },
+              image: wp.imageUrl?.secure_url ?? wp.image,
+              public_image_id: wp.imageUrl?.public_id ?? wp.public_image_id,
+              category_word_pos: {
+                createMany: {
+                  data: wp.categories.map((c) => ({
+                    category_id: c
+                  }))
+                }
+              }
+            }
+          });
+        })
+      );
+
+      const updatedWord = await tx.words.update({
+        where: { word_id: wordId },
+        data: {
+          word: wordReq.word,
+          meaning_vi: wordReq.meaning_vi,
+          phonetic: wordReq.phonetic,
+          ...(audioRes && {
+            audio: audioRes.secure_url,
+            public_id: audioRes.public_id
+          }),
+          word_pos: {
+            create: newWordPos.map((wp) => ({
+              level_id: wp.level,
+              pos_tag_id: wp.pos_tag,
+              definition: wp.definition,
+              word_example: {
+                createMany: {
+                  data: wp.examples.map((e) => ({
+                    example: e.en,
+                    example_vi: e.vi
+                  }))
+                }
+              },
+              image: wp.imageUrl?.secure_url ?? null,
+              public_image_id: wp.imageUrl?.public_id ?? null
+            }))
+          }
+        },
+        include: { word_pos: { include: { word_example: true } } }
+      });
+
+      const newWordPosIds = updatedWord.word_pos
+        .map((wp) => wp.word_pos_id)
+        .filter((id) => !keepIds.includes(id));
+      const categoryData = newWordPosIds.flatMap((id, i) =>
+        newWordPos[i].categories.map((c) => ({
+          word_pos_id: id,
+          category_id: c
+        }))
+      );
+
+      if (categoryData.length)
+        await tx.category_word_pos.createMany({ data: categoryData });
+
+      return updatedWord;
+    });
+  }
+
+  async isWordExist(word: string): Promise<boolean> {
+    const existing = await this.prisma.words.findUnique({
+      where: { word },
+      select: { word_id: true }
+    });
+
+    return !!existing;
+  }
+
+  async getWordById(wordId: string) {
+    return this.prisma.words.findUnique({
+      where: {
+        word_id: wordId
+      },
+      include: {
+        word_pos: {
+          include: {
+            word_example: true,
+            category_word_pos: true
+          }
+        }
+      }
+    });
+  }
+  async deleteWord(wordId: string, token: string) {
+    const word = await this.prisma.words.findUnique({
+      where: { word_id: wordId },
+      include: { word_pos: true }
+    });
+
+    if (!word) {
+      throw new Error(`Word with ID ${wordId} not found`);
+    }
+
+    const deletePromises: Promise<any>[] = [];
+
+    if (word.public_id) {
+      deletePromises.push(this.deleteAudio(word.public_id, token));
+    }
+
+    const publicImageIds = word.word_pos
+      .map((wp) => wp.public_image_id)
+      .filter((id): id is string => !!id);
+
+    if (publicImageIds.length > 0) {
+      deletePromises.push(this.deleteImages(publicImageIds, token));
+    }
+
+    await Promise.allSettled(deletePromises);
+
+    return this.prisma.words.delete({
+      where: { word_id: wordId }
+    });
   }
 }

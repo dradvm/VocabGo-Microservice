@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package game;
+
+option go_package = "gamepb";
+
+message GetStartedStageRequest {
+  // gameLevelId không bắt buộc
+  optional string gameLevelId = 1;
+}
+
+message GetStartedStageResponse {
+  string stageId = 1;
+  string lessonId = 2;
+}
+
+message GetGameLevelsWithStagesResponse {
+  repeated GameLevel game_levels = 1;
+}
+
+message GameLevel {
+  string game_level_id = 1;
+
+  message Stage {
+    string stage_id = 1;
+  }
+
+  repeated Stage stage = 2;
+}
+message Empty {}
+
+message GetNextLessonRequest {
+  string lessonId = 1;
+}
+
+message GetNextLessonResponse {
+  optional string lessonId = 1;
+  optional string stageId = 2;
+}
+
+
+service GameService {
+  rpc GetStartedStage(GetStartedStageRequest) returns (GetStartedStageResponse);
+  rpc GetGameLevelsWithStages(Empty) returns (GetGameLevelsWithStagesResponse);
+  rpc GetNextLesson(GetNextLessonRequest) returns (GetNextLessonResponse);
+}

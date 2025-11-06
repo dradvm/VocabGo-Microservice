@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model user_lesson_progress {
+  user_lesson_progress_id String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lesson_id               String              @db.Uuid
+  completed_at            DateTime?           @db.Timestamptz(6)
+  created_at              DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?           @default(now()) @db.Timestamptz(6)
+  user_stage_progress_id  String              @db.Uuid
+  time_spent              Int?                @default(0)
+  accuracy_rate           Decimal?            @default(0) @db.Decimal(5, 2)
+  user_stage_progress     user_stage_progress @relation(fields: [user_stage_progress_id], references: [user_stage_progress_id], onDelete: Cascade)
+}
+
+model user_stage_progress {
+  user_stage_progress_id String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                String                 @db.Uuid
+  stage_id               String                 @db.Uuid
+  is_done                Boolean?               @default(false)
+  user_lesson_progress   user_lesson_progress[]
+}
+
+model streak {
+  streak_id                               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                 String       @db.Uuid
+  current_streak                          Int          @default(0)
+  longest_streak                          Int          @default(0)
+  start_date                              DateTime?    @db.Date
+  last_active_at                          DateTime?    @db.Timestamptz(6)
+  created_at                              DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at                              DateTime     @default(now()) @db.Timestamptz(6)
+  freeze_available                        Int          @default(0)
+  streak_day_streak_day_streak_idTostreak streak_day[] @relation("streak_day_streak_idTostreak")
+}
+
+model streak_day {
+  streak_day_id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                             String   @db.Uuid
+  activity_date                       DateTime @db.Date
+  created_at                          DateTime @default(now()) @db.Timestamptz(6)
+  is_frozen                           Boolean? @default(false)
+  streak_id                           String?  @db.Uuid
+  streak_streak_day_streak_idTostreak streak?  @relation("streak_day_streak_idTostreak", fields: [streak_id], references: [streak_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_streak")
+}
