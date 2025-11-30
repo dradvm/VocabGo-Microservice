@@ -1,25 +1,25 @@
+import { ClientsModule, Transport } from '@nestjs/microservices';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from 'src/prisma/prisma.module';
-import { GameController } from './game.controller';
-import { GameService } from './game.service';
-import { ClientsModule, Transport } from '@nestjs/microservices';
+import { QuestController } from './quest.controller';
+import { QuestService } from './quest.service';
 
 @Module({
   imports: [
     PrismaModule,
     ClientsModule.register([
       {
-        name: 'PROGRESS_PUBLISHER',
+        name: 'USER_PUBLISHER',
         transport: Transport.RMQ,
         options: {
           urls: ['amqp://localhost:5672'],
-          queue: 'progress_queue',
+          queue: 'user_queue',
           queueOptions: { durable: true }
         }
       }
     ])
   ],
-  controllers: [GameController],
-  providers: [GameService]
+  controllers: [QuestController],
+  providers: [QuestService]
 })
-export class GameModule {}
+export class QuestModule {}

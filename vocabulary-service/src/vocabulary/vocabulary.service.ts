@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { parse } from 'csv-parse/sync';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { HttpService } from '@nestjs/axios';
@@ -140,19 +140,39 @@ export class VocabularyService {
     return '';
   }
   async importCsv(file: Express.Multer.File) {
-    const text = file.buffer.toString('utf-8');
-    const rows: CsvRow[] = parse(text, {
-      columns: true,
-      skip_empty_lines: true,
-      delimiter: ';'
-    });
+    if (!file) throw new BadRequestException('❌ No file uploaded');
+
+    const text = file.buffer.toString('utf-8').trim();
+    if (!text) throw new BadRequestException('❌ CSV file is empty');
+    let rows: CsvRow[];
+    try {
+      rows = parse(text, {
+        columns: true,
+        skip_empty_lines: true,
+        delimiter: ';'
+      });
+    } catch (err) {
+      throw new BadRequestException(`❌ Invalid CSV format: ${err}`);
+    }
+    if (!rows.length)
+      throw new BadRequestException(
+        '❌ No valid data rows found in the CSV file'
+      );
     const [levelsDb, tagsDb, wordsDb, categoriesDb] = await Promise.all([
       this.prisma.levels.findMany(),
       this.prisma.pos_tags.findMany(),
       this.prisma.words.findMany(),
       this.prisma.categories.findMany()
     ]);
+    const requiredCols = ['headword', 'CEFR', 'pos'];
+    const headers = Object.keys(rows[0]);
+    const missingCols = requiredCols.filter((col) => !headers.includes(col));
 
+    if (missingCols.length) {
+      throw new BadRequestException(
+        `❌ Missing required column(s): ${missingCols.join(', ')}`
+      );
+    }
     const levelMap = new Map(levelsDb.map((l) => [l.level_name, l.level_id]));
     const tagMap = new Map(tagsDb.map((t) => [t.pos_tag, t.pos_tag_id]));
     const wordMap = new Map(wordsDb.map((w) => [w.word, w.word_id]));
@@ -194,7 +214,7 @@ export class VocabularyService {
       }
     }
 
-    return { message: '✅ Import thành công', total: rows.length };
+    return { message: 'Import Successful' };
   }
 
   delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -424,9 +444,10 @@ export class VocabularyService {
   }
 
   async getWordsByWordPosIds(wordPosIds: string[]) {
-    if (wordPosIds.length == 0) {
+    if (wordPosIds.length === 0) {
       return null;
     }
+
     return this.prisma.words.findMany({
       where: {
         word_pos: {
@@ -439,6 +460,11 @@ export class VocabularyService {
       },
       include: {
         word_pos: {
+          where: {
+            word_pos_id: {
+              in: wordPosIds
+            }
+          },
           include: {
             word_example: true,
             levels: true,
@@ -478,7 +504,8 @@ export class VocabularyService {
           word_pos: {
             include: {
               pos_tags: true,
-              levels: true
+              levels: true,
+              word_example: true
             },
             orderBy: {
               levels: {
@@ -826,6 +853,25 @@ export class VocabularyService {
       }
     });
   }
+  async getWord(word: string) {
+    return this.prisma.words.findFirst({
+      where: {
+        word: {
+          contains: word,
+          mode: 'insensitive'
+        }
+      },
+      include: {
+        word_pos: {
+          include: {
+            word_example: true,
+            category_word_pos: true
+          }
+        }
+      }
+    });
+  }
+
   async deleteWord(wordId: string, token: string) {
     const word = await this.prisma.words.findUnique({
       where: { word_id: wordId },

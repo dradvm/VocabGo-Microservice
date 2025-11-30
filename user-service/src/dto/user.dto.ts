@@ -6,7 +6,8 @@ export class CreateUserRequest {
   email: string;
 }
 
-export class ClaimKPRequest {
+export class DoneRequest {
   userId: string;
-  kp: number;
+  kp?: number = 0;
+  reward?: number = 0;
 }

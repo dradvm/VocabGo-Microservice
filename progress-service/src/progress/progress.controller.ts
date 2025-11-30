@@ -15,9 +15,25 @@ export class ProgressController {
     return this.progressService.initApplicationStageProgress(data);
   }
 
+  @EventPattern('stage_deleted')
+  deleteUserStageProgress(data: { stageId: string }) {
+    return this.progressService.deleteUserStageProgress(data.stageId);
+  }
+
+  @EventPattern('lesson_deleted')
+  deleteUserLessonProgress(data: { lessonId: string }) {
+    return this.progressService.deleteUserLessonProgress(data.lessonId);
+  }
+
   @Get('user')
-  getUserCurrentGameLevelProgress(@Req() req: PayloadToken) {
-    return this.progressService.getUserCurrentGameLevelProgress(req.sub);
+  getUserCurrentGameLevelProgress(@Req() req: Request) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const payloadToken: PayloadToken = JSON.parse(
+      req.headers['x-user-payload']
+    );
+    return this.progressService.getUserCurrentGameLevelProgress(
+      payloadToken.sub
+    );
   }
   @Get('gameLevels')
   async getGameLevelsProgress(@Req() req: Request) {
@@ -67,6 +83,15 @@ export class ProgressController {
       req.headers['x-user-payload']
     );
     return this.progressService.getUserStreakInfo(payloadToken.sub);
+  }
+
+  @Post('streak/freeze')
+  async recoverFreeze(@Req() req: Request) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const payloadToken: PayloadToken = JSON.parse(
+      req.headers['x-user-payload']
+    );
+    return this.progressService.recoverFreeze(payloadToken.sub);
   }
   @Get('streak/preview')
   async getUserStreakPreview(@Req() req: Request) {

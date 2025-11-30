@@ -22,11 +22,6 @@ export class AuthController {
     @Inject('GOOGLE_OAUTH_CLIENT') private readonly googleClient: OAuth2Client
   ) {}
 
-  @Get('')
-  hello() {
-    return 'Hello';
-  }
-
   @Post('google-login')
   async googleLogin(
     @Body('idToken') idToken: string,
@@ -39,7 +34,6 @@ export class AuthController {
       audience: process.env.GOOGLE_CLIENT_ID
     });
     const payload = ticket.getPayload();
-
     if (!payload) {
       return { status: 'error', message: 'Invalid ID token' };
     }
@@ -183,7 +177,6 @@ export class AuthController {
     @Res() res: Response
   ) {
     const token = await this.authService.loginAdmin(username, password);
-    console.log(token);
     res.cookie('refreshToken', token.refreshToken, {
       httpOnly: true,
       secure: true, // bật khi dùng https
@@ -199,18 +192,8 @@ export class AuthController {
   @Post('refresh-token')
   async refreshToken(
     @Req() req: Request,
-    @Body('refreshToken') refreshTokenFromBody?: string,
-    @Headers('x-platform') platform?: string
+    @Body('refreshToken') refreshToken: string
   ) {
-    let refreshToken: string;
-
-    if (platform === 'mobile' && refreshTokenFromBody) {
-      refreshToken = refreshTokenFromBody;
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      refreshToken = req.cookies['refreshToken'];
-    }
-
     return this.authService.grantNewToken(refreshToken);
   }
   @Post('logout')

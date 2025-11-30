@@ -1,11 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import { game_level } from '@prisma/client';
 import { GetStartedStageResponse } from 'src/dto/game.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { GameLevelRequest, StageRequest } from 'types/game';
+import { GameLevelRequest, LessonRequest, StageRequest } from 'types/game';
 @Injectable()
 export class GameService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject('PROGRESS_PUBLISHER') private readonly progressClient: ClientProxy
+  ) {}
 
   async getStartedStage(
     gameLevelId: string | null
@@ -84,6 +88,37 @@ export class GameService {
       }
     });
   }
+  async getAllGameLevelStages(levelId: string) {
+    return this.prisma.stage.findMany({
+      where: {
+        game_level_id: levelId
+      },
+      orderBy: {
+        stage_order: 'asc'
+      },
+      include: {
+        lesson: {
+          orderBy: {
+            lesson_order: 'asc'
+          },
+          include: {
+            lesson_type: true,
+            lesson_question: {
+              include: {
+                question: {
+                  include: {
+                    difficulty: true
+                  }
+                }
+              }
+            }
+          }
+        },
+        stage_word: true,
+        game_level: true
+      }
+    });
+  }
   async getGameLevelsWithStages() {
     const gameLevels = await this.prisma.game_level.findMany({
       select: {
@@ -96,19 +131,24 @@ export class GameService {
             stage_id: true
           }
         }
+      },
+      orderBy: {
+        level_order: 'asc'
       }
     });
     return {
-      gameLevels: gameLevels.map((gameLevel) => {
-        return {
-          gameLevelId: gameLevel.game_level_id,
-          stage: gameLevel.stage.map((s) => {
-            return {
-              stageId: s.stage_id
-            };
-          })
-        };
-      })
+      gameLevels: gameLevels
+        .filter((gameLevel) => gameLevel.stage.length > 0)
+        .map((gameLevel) => {
+          return {
+            gameLevelId: gameLevel.game_level_id,
+            stage: gameLevel.stage.map((s) => {
+              return {
+                stageId: s.stage_id
+              };
+            })
+          };
+        })
     };
   }
   async getNextLesson(lessonId: string) {
@@ -120,7 +160,6 @@ export class GameService {
         }
       }
     });
-
     if (!currentLesson) {
       return { lessonId: '', stageId: '' };
     }
@@ -148,6 +187,9 @@ export class GameService {
         game_level_id: game_level.game_level_id,
         stage_order: { gt: stage.stage_order }
       },
+      orderBy: {
+        stage_order: 'asc'
+      },
       include: {
         lesson: {
           orderBy: { lesson_order: 'asc' },
@@ -155,17 +197,14 @@ export class GameService {
         }
       }
     });
-
     if (nextStage?.lesson?.length) {
       nextLesson = nextStage.lesson[0];
       return { lessonId: nextLesson.lesson_id, stageId: nextLesson.stage_id };
     }
-
-    // --- 3️⃣ Nếu hết stage, tìm game level tiếp theo ---
     const nextGameLevel = await this.prisma.game_level.findFirst({
-      where: { level_order: { gt: game_level.level_order } }
+      where: { level_order: { gt: game_level.level_order } },
+      orderBy: { level_order: 'asc' }
     });
-
     if (nextGameLevel) {
       nextLesson = await this.prisma.lesson.findFirst({
         where: { stage: { game_level_id: nextGameLevel.game_level_id } },
@@ -244,6 +283,17 @@ export class GameService {
   }
 
   async addStage(gameLevelId: string, stage: StageRequest) {
+    const flashcardLessonType = await this.prisma.lesson_type.findFirst({
+      where: {
+        lesson_type_name: 'Flashcard'
+      }
+    });
+    const rewardLessonType = await this.prisma.lesson_type.findFirst({
+      where: {
+        lesson_type_name: 'Reward'
+      }
+    });
+
     return this.prisma.$transaction(async (tx) => {
       const order = await this.prisma.stage.count({
         where: {
@@ -254,7 +304,23 @@ export class GameService {
         data: {
           stage_name: stage.stageName,
           game_level_id: gameLevelId,
-          stage_order: order + 1
+          stage_order: order + 1,
+          lesson: {
+            create: [
+              {
+                lesson_name: 'Học Flashcard',
+                lesson_type_id: flashcardLessonType?.lesson_type_id ?? '',
+                lesson_order: 1,
+                lesson_reward: 5
+              },
+              {
+                lesson_name: 'Nhận thưởng',
+                lesson_type_id: rewardLessonType?.lesson_type_id ?? '',
+                lesson_order: 2,
+                lesson_reward: 100
+              }
+            ]
+          }
         }
       });
       await tx.stage_word.createMany({
@@ -290,10 +356,119 @@ export class GameService {
     });
   }
   async deleteStage(stageId: string) {
-    return this.prisma.stage.delete({
+    const stage = await this.prisma.stage.delete({
       where: {
         stage_id: stageId
       }
     });
+    this.progressClient.emit('stage_deleted', { stageId: stage.stage_id });
+  }
+
+  async updateStageActive(stageId: string, isActive: boolean) {
+    return this.prisma.stage.update({
+      where: {
+        stage_id: stageId
+      },
+      data: {
+        is_active: isActive
+      }
+    });
+  }
+
+  async getAllLessons(stageId: string) {
+    return this.prisma.lesson.findMany({
+      where: { stage_id: stageId },
+      orderBy: { lesson_order: 'asc' },
+      include: {
+        lesson_type: true,
+        lesson_question: {
+          include: {
+            question: true
+          }
+        }
+      }
+    });
+  }
+  async getLessonTypes() {
+    return this.prisma.lesson_type.findMany();
+  }
+  async addLesson(stageId: string, lesson: LessonRequest) {
+    const count = await this.prisma.lesson.count({
+      where: {
+        stage_id: stageId
+      }
+    });
+    await this.prisma.lesson.updateMany({
+      where: {
+        stage_id: stageId,
+        lesson_order: count
+      },
+      data: {
+        lesson_order: count + 1
+      }
+    });
+    return this.prisma.lesson.create({
+      data: {
+        lesson_name: lesson.lessonName,
+        lesson_order: count,
+        lesson_reward: lesson.lessonReward,
+        lesson_type_id: lesson.lessonTypeId,
+        stage_id: stageId,
+        lesson_question: {
+          create: lesson.questions.map((question) => ({
+            question_id: question.questionId,
+            question_count: question.questionCount
+          }))
+        }
+      }
+    });
+  }
+
+  async updateLesson(lessonId: string, lesson: LessonRequest) {
+    await this.prisma.lesson_question.deleteMany({
+      where: {
+        lesson_id: lessonId
+      }
+    });
+    return this.prisma.lesson.update({
+      where: {
+        lesson_id: lessonId
+      },
+      data: {
+        lesson_name: lesson.lessonName,
+        lesson_reward: lesson.lessonReward,
+        lesson_type_id: lesson.lessonTypeId,
+        lesson_question: {
+          create: lesson.questions.map((question) => ({
+            question_id: question.questionId,
+            question_count: question.questionCount
+          }))
+        }
+      }
+    });
+  }
+
+  async deleteLesson(lessonId: string) {
+    const lesson = await this.prisma.lesson.delete({
+      where: { lesson_id: lessonId }
+    });
+    this.progressClient.emit('lesson_deleted', { lessonId: lesson.lesson_id });
+    return lesson;
+  }
+
+  async updateLessonOrder(stageId: string, ids: string[]) {
+    const updates = ids.map((id, index) =>
+      this.prisma.lesson.update({
+        where: {
+          stage_id: stageId,
+          lesson_id: id
+        },
+        data: { lesson_order: index + 1 }
+      })
+    );
+    return this.prisma.$transaction(updates);
+  }
+  async getAllQuestions() {
+    return this.prisma.question.findMany({});
   }
 }

@@ -5,13 +5,12 @@ import {
   Get,
   Param,
   Patch,
-  Post,
-  Query
+  Post
 } from '@nestjs/common';
 import { GameService } from './game.service';
 import { GrpcMethod } from '@nestjs/microservices';
 import { GetNextLessonRequest, GetStartedStageRequest } from 'src/dto/game.dto';
-import { GameLevelRequest, StageRequest } from 'types/game';
+import { GameLevelRequest, LessonRequest, StageRequest } from 'types/game';
 
 @Controller('')
 export class GameController {
@@ -53,6 +52,10 @@ export class GameController {
   async getStages(@Param('gameLevelId') gameLevelId: string) {
     return this.gameService.getGameLevelStages(gameLevelId);
   }
+  @Get('gameLevels/:gameLevelId/stages/all')
+  async getAllStages(@Param('gameLevelId') gameLevelId: string) {
+    return this.gameService.getAllGameLevelStages(gameLevelId);
+  }
 
   @Patch('gameLevels/:gameLevelId/stages/order')
   async updateStageOrder(
@@ -75,6 +78,13 @@ export class GameController {
   ) {
     return this.gameService.updateStage(stageId, body);
   }
+  @Patch('gameLevels/:gameLevelId/stages/:stageId/active')
+  async updateStageActive(
+    @Param('stageId') stageId: string,
+    @Body() body: { isActive: boolean }
+  ) {
+    return this.gameService.updateStageActive(stageId, body.isActive);
+  }
 
   @Delete('gameLevels/:gameLevelId/stages/:stageId')
   async deleteStage(@Param('stageId') stageId: string) {
@@ -86,9 +96,47 @@ export class GameController {
     return this.gameService.getGameLevelsWithStages();
   }
 
-  @Get('lessons/:lessonId/nextLesson')
   @GrpcMethod('GameService', 'GetNextLesson')
   async getNextLesson(data: GetNextLessonRequest) {
     return this.gameService.getNextLesson(data.lessonId);
+  }
+  @Get('lessons/type')
+  getLessonTypes() {
+    return this.gameService.getLessonTypes();
+  }
+  @Get('lessons/:stageId')
+  getAllLessons(@Param('stageId') stageId: string) {
+    return this.gameService.getAllLessons(stageId);
+  }
+
+  @Post('lessons/:stageId')
+  addLesson(@Param('stageId') stageId: string, @Body() body: LessonRequest) {
+    return this.gameService.addLesson(stageId, body);
+  }
+
+  @Patch('lessons/:lessonId')
+  updateLesson(
+    @Param('lessonId') lessonId: string,
+    @Body() body: LessonRequest
+  ) {
+    return this.gameService.updateLesson(lessonId, body);
+  }
+
+  @Delete('lessons/:lessonId')
+  deleteLesson(@Param('lessonId') lessonId: string) {
+    return this.gameService.deleteLesson(lessonId);
+  }
+
+  @Patch('lessons/:stageId/order')
+  updateLessonOrder(
+    @Param('stageId') stageId: string,
+    @Body() body: { lessonIds: string[] }
+  ) {
+    return this.gameService.updateLessonOrder(stageId, body.lessonIds);
+  }
+
+  @Get('questions')
+  getAllQuestions() {
+    return this.gameService.getAllQuestions();
   }
 }

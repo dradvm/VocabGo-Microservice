@@ -66,7 +66,13 @@ export class VocabularyController {
 
   @Get('words/:wordId')
   async getWordById(@Param('wordId') wordId: string) {
+    console.log('A');
     return this.vocabularyService.getWordById(wordId);
+  }
+  @Get('words/word/:word')
+  async getWord(@Param('word') word: string) {
+    console.log('B');
+    return this.vocabularyService.getWord(word);
   }
   @Get('words/isExist/:word')
   async isWordExist(@Param('word') word: string) {

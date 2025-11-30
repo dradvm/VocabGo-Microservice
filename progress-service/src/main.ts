@@ -14,7 +14,6 @@ async function bootstrap() {
       queueOptions: { durable: true }
     }
   });
-
   app.use(morgan('dev'));
   await app.startAllMicroservices();
   await app.listen(3005);

@@ -7,4 +7,5 @@ export class DoneLessonRequest {
   kp?: number;
   timeSpent?: number;
   accuracyRate?: number;
+  isGame?: boolean = true;
 }

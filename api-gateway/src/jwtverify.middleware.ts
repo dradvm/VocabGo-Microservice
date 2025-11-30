@@ -7,6 +7,7 @@ export function JwtVerifyMiddleware(secret: string | undefined) {
     if (!secret) {
       throw new Error('JWT_SECRET is not defined');
     }
+    if (req.method === 'OPTIONS') return next();
     if (req.path.startsWith('/auth') || req.path.startsWith('/translate')) {
       // auth route không cần verify
       return next();

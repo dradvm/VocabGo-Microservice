@@ -70,7 +70,11 @@ export class ProgressService implements OnModuleInit {
     const data: GetStartedStageResponse = await firstValueFrom(
       this.gameService.getStartedStage({ gameLevelId: null })
     );
-
+    await this.prisma.user_stage_progress.deleteMany({
+      where: {
+        user_id: req.userId
+      }
+    });
     const userStageProgress = await this.createUserStageProgress(
       req.userId,
       data.stageId
@@ -84,21 +88,67 @@ export class ProgressService implements OnModuleInit {
     const data: GetGameLevelsWithStages = await firstValueFrom(
       this.gameService.getGameLevelsWithStages({})
     );
-    const stageProgress = await this.prisma.user_stage_progress.findFirst({
-      where: {
-        user_id: userId,
-        is_done: false
+
+    let stageProgress = await this.prisma.user_stage_progress.findFirst({
+      where: { user_id: userId, is_done: false }
+    });
+    const countStageProgress = await this.prisma.user_stage_progress.count({
+      where: { user_id: userId }
+    });
+    if (!countStageProgress) {
+      await this.initApplicationStageProgress({ userId: userId });
+      stageProgress = await this.prisma.user_stage_progress.findFirst({
+        where: { user_id: userId, is_done: false }
+      });
+    }
+    let gameLevel = data.gameLevels.find((level) =>
+      level.stage.some((stage) => stage.stageId === stageProgress?.stage_id)
+    );
+
+    if (!gameLevel) {
+      gameLevel = data.gameLevels[data.gameLevels.length - 1];
+    }
+    const lastLessonProgress = await this.prisma.user_lesson_progress.findFirst(
+      {
+        where: {
+          user_stage_progress: {
+            user_id: userId
+          }
+        },
+        orderBy: {
+          completed_at: 'desc'
+        },
+        include: {
+          user_stage_progress: true
+        }
       }
-    });
-    const gameLevel = data.gameLevels.find((gameLelel) => {
-      return gameLelel.stage.some(
-        (stage) => stage.stageId === stageProgress?.stage_id
+    );
+    if (lastLessonProgress?.user_stage_progress.is_done) {
+      const nextLesson = await firstValueFrom(
+        this.gameService.getNextLesson({
+          lessonId: lastLessonProgress.lesson_id
+        })
       );
-    });
-    return {
-      gameLevelId: gameLevel?.gameLevelId || null
-    };
+      if (
+        lastLessonProgress.user_stage_progress_id != nextLesson.stageId &&
+        nextLesson.lessonId
+      ) {
+        await this.prisma.user_stage_progress.create({
+          data: {
+            user_id: userId,
+            stage_id: nextLesson.stageId,
+            user_lesson_progress: {
+              create: {
+                lesson_id: nextLesson.lessonId
+              }
+            }
+          }
+        });
+      }
+    }
+    return { gameLevelId: gameLevel?.gameLevelId || null };
   }
+
   async getGameLevelsProgress(userId: string) {
     const data: GetGameLevelsWithStages = await firstValueFrom(
       this.gameService.getGameLevelsWithStages({})
@@ -123,7 +173,6 @@ export class ProgressService implements OnModuleInit {
         isStarted: isStarted
       };
     });
-
     return result;
   }
   async getGameStagesProgress(stageIds: string[], userId: string) {
@@ -147,12 +196,24 @@ export class ProgressService implements OnModuleInit {
         });
 
         // Emit sự kiện hoàn thành bài học
-        this.userClient.emit('lesson_progress_done', {
-          userId,
-          kp: data.kp
-        });
-        isStreakCreated = await this.handleUserStreakAction(userId);
-        if (!progress || progress.completed_at) return;
+        if (data.isGame) {
+          this.userClient.emit('lesson_progress_done', {
+            userId,
+            kp: data.kp
+          });
+        } else {
+          this.userClient.emit('lesson_progress_done', {
+            userId,
+            reward: data.kp
+          });
+        }
+        if (data.isGame) {
+          isStreakCreated = await this.handleUserStreakAction(userId);
+        } else {
+          isStreakCreated = false;
+        }
+
+        if (!progress) return;
 
         // Cập nhật tiến trình bài học hiện tại
         await tx.user_lesson_progress.update({
@@ -171,7 +232,6 @@ export class ProgressService implements OnModuleInit {
         const nextLesson = await firstValueFrom(
           this.gameService.getNextLesson({ lessonId: progress.lesson_id })
         );
-
         // Nếu sang stage mới, cập nhật và tạo stage progress mới
         if (stageProgress.stage_id !== nextLesson.stageId) {
           await tx.user_stage_progress.update({
@@ -189,14 +249,21 @@ export class ProgressService implements OnModuleInit {
             return;
           }
         }
-
-        // Tạo lesson progress cho bài học tiếp theo
-        await tx.user_lesson_progress.create({
-          data: {
+        const existingProgress = await tx.user_lesson_progress.findFirst({
+          where: {
             user_stage_progress_id: stageProgress.user_stage_progress_id,
             lesson_id: nextLesson.lessonId
           }
         });
+
+        if (!existingProgress) {
+          await tx.user_lesson_progress.create({
+            data: {
+              user_stage_progress_id: stageProgress.user_stage_progress_id,
+              lesson_id: nextLesson.lessonId
+            }
+          });
+        }
       });
       return { isStreakCreated };
     } catch (err) {
@@ -262,21 +329,8 @@ export class ProgressService implements OnModuleInit {
       return false;
     }
 
-    let isFrozen = false;
-
     if (diffDays === 1) {
       streak.current_streak += 1;
-    } else if (diffDays === 2 && streak.freeze_available > 0) {
-      streak.freeze_available -= 1;
-      streak.current_streak += 1;
-      isFrozen = true;
-      await this.prisma.streak_day.create({
-        data: {
-          streak_id: streak.streak_id,
-          user_id: userId,
-          activity_date: today
-        }
-      });
     } else {
       streak.current_streak = 1;
       streak.start_date = today;
@@ -293,18 +347,14 @@ export class ProgressService implements OnModuleInit {
       where: { streak_id: streak.streak_id },
       data: streak
     });
-
     await this.prisma.streak_day.create({
       data: {
         streak_id: streak.streak_id,
         user_id: userId,
-        activity_date: isFrozen
-          ? new Date(today.getTime() - 24 * 60 * 60 * 1000)
-          : today,
-        is_frozen: isFrozen
+        activity_date: today,
+        is_frozen: false
       }
     });
-
     return true;
   }
 
@@ -318,8 +368,7 @@ export class ProgressService implements OnModuleInit {
 
     // Lấy streak hiện tại
     const streak = await this.prisma.streak.findFirst({
-      where: { user_id: userId },
-      select: { current_streak: true }
+      where: { user_id: userId }
     });
 
     // Lấy các ngày streak hoặc streak frozen trong 7 ngày gần nhất
@@ -356,6 +405,7 @@ export class ProgressService implements OnModuleInit {
 
     return {
       currentStreak: streak?.current_streak ?? 0,
+      freezeAvailable: streak?.freeze_available ?? 0,
       days
     };
   }
@@ -424,28 +474,72 @@ export class ProgressService implements OnModuleInit {
 
     let usedFreezeYesterday = false;
 
-    // Nếu bỏ quá 2 ngày -> reset streak
-    if (diffDays > 2) {
+    if (
+      diffDays >= 2 &&
+      streak.freeze_available > 0 &&
+      diffDays - 1 <= streak.freeze_available
+    ) {
+      await this.prisma.streak.update({
+        where: { streak_id: streak.streak_id },
+        data: {
+          freeze_available: streak.freeze_available - diffDays + 1,
+          last_active_at: new Date(
+            lastActive.getTime() + 24 * 60 * 60 * 1000 * (diffDays - 1)
+          )
+        }
+      });
+      usedFreezeYesterday = true;
+      for (let i = 1; i < diffDays; i++) {
+        await this.prisma.streak_day.create({
+          data: {
+            streak_id: streak.streak_id,
+            user_id: userId,
+            activity_date: new Date(
+              lastActive.getTime() + 24 * 60 * 60 * 1000 * i
+            ),
+            is_frozen: true
+          }
+        });
+      }
+    } else if (diffDays > 2) {
       await this.prisma.streak.update({
         where: { streak_id: streak.streak_id },
         data: { current_streak: 0 }
       });
       return { currentStreak: 0, usedFreezeYesterday: false };
     }
-
-    // Nếu bỏ đúng 2 ngày và có freeze -> trừ freeze, giữ streak
-    if (diffDays === 2 && streak.freeze_available > 0) {
-      await this.prisma.streak.update({
-        where: { streak_id: streak.streak_id },
-        data: { freeze_available: streak.freeze_available - 1 }
-      });
-      usedFreezeYesterday = true;
-    }
-
     // Còn lại (diffDays 0 hoặc 1) => không thay đổi
     return {
       currentStreak: streak.current_streak,
       usedFreezeYesterday
     };
+  }
+
+  async recoverFreeze(userId: string) {
+    const streak = await this.prisma.streak.findFirst({
+      where: { user_id: userId }
+    });
+    if (!streak) return null;
+
+    const newFreeze = (streak.freeze_available ?? 0) + 2;
+    this.userClient.emit('streak_freeze_recovered', { userId });
+    return this.prisma.streak.update({
+      where: { streak_id: streak.streak_id },
+      data: { freeze_available: newFreeze }
+    });
+  }
+  async deleteUserStageProgress(stageId: string) {
+    return this.prisma.user_stage_progress.deleteMany({
+      where: {
+        stage_id: stageId
+      }
+    });
+  }
+  async deleteUserLessonProgress(lessonId: string) {
+    return this.prisma.user_lesson_progress.deleteMany({
+      where: {
+        lesson_id: lessonId
+      }
+    });
   }
 }

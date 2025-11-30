@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { ClaimKPRequest, CreateUserRequest } from 'src/dto/user.dto';
+import { CreateUserRequest, DoneRequest } from 'src/dto/user.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
@@ -67,14 +67,17 @@ export class UserService {
       return false;
     }
   }
-  async claimKP(data: ClaimKPRequest) {
+  async onLessonDone(data: DoneRequest) {
     return this.prisma.user_wallet.update({
       where: {
         user_id: data.userId
       },
       data: {
         kp_points: {
-          increment: data.kp
+          increment: data.kp ?? 0
+        },
+        rubys: {
+          increment: data.reward ?? 0
         }
       }
     });
@@ -187,5 +190,186 @@ export class UserService {
         where: { user_id: userId }
       })
     };
+  }
+
+  async follow(userId: string, followingId: string) {
+    if (userId === followingId) return false;
+
+    const exists = await this.prisma.user_follower.findUnique({
+      where: {
+        user_id_follower_id: {
+          user_id: followingId,
+          follower_id: userId
+        }
+      }
+    });
+    if (exists) {
+      await this.prisma.user_follower.delete({
+        where: {
+          user_id_follower_id: {
+            user_id: followingId,
+            follower_id: userId
+          }
+        }
+      });
+    } else {
+      await this.prisma.user_follower.create({
+        data: {
+          user_id: followingId,
+          follower_id: userId
+        }
+      });
+    }
+
+    return true;
+  }
+  async checkMutualFollow(userA: string, userB: string) {
+    const aFollowB = await this.prisma.user_follower.findUnique({
+      where: {
+        user_id_follower_id: {
+          user_id: userB,
+          follower_id: userA
+        }
+      }
+    });
+
+    const bFollowA = await this.prisma.user_follower.findUnique({
+      where: {
+        user_id_follower_id: {
+          user_id: userA,
+          follower_id: userB
+        }
+      }
+    });
+
+    return !!(aFollowB && bFollowA);
+  }
+
+  async getFollowers(userId: string) {
+    const followers = await this.prisma.user_follower.findMany({
+      where: { user_id: userId }
+    });
+
+    return this.prisma.user_profile.findMany({
+      where: {
+        user_id: {
+          in: followers.map((follower) => follower.follower_id)
+        }
+      },
+      include: {
+        user_follower_user_follower_user_idTouser_profile: {
+          where: { follower_id: userId }
+        }
+      }
+    });
+  }
+
+  async getFollowings(userId: string) {
+    const followings = await this.prisma.user_follower.findMany({
+      where: { follower_id: userId }
+    });
+    return this.prisma.user_profile.findMany({
+      where: {
+        user_id: {
+          in: followings.map((following) => following.user_id)
+        }
+      },
+      include: {
+        user_follower_user_follower_user_idTouser_profile: {
+          where: { follower_id: userId }
+        }
+      }
+    });
+  }
+
+  async countFollowers(userId: string) {
+    return await this.prisma.user_follower.count({
+      where: { user_id: userId }
+    });
+  }
+
+  async countFollowings(userId: string) {
+    return await this.prisma.user_follower.count({
+      where: { follower_id: userId }
+    });
+  }
+
+  async isFollowing(userId: string, targetId: string) {
+    const exists = await this.prisma.user_follower.findUnique({
+      where: {
+        user_id_follower_id: {
+          user_id: targetId,
+          follower_id: userId
+        }
+      }
+    });
+
+    return !!exists;
+  }
+
+  async getUsersNotFollowedLoadMore(
+    userId: string,
+    search: string = '',
+    limit: number = 10
+  ) {
+    // Query load dạng "limit", không phân trang
+    const users = await this.prisma.user_profile.findMany({
+      where: {
+        user_id: {
+          notIn: [userId]
+        },
+        OR: [{ public_id: { contains: search, mode: 'insensitive' } }]
+      },
+      take: limit, // mỗi lần limit tăng
+      orderBy: { public_id: 'asc' },
+      include: {
+        user_follower_user_follower_user_idTouser_profile: {
+          where: { follower_id: userId }
+        }
+      }
+    });
+
+    return users;
+  }
+
+  async onStreakFreezeRecovered(userId: string) {
+    const userWallet = await this.prisma.user_wallet.findUnique({
+      where: { user_id: userId }
+    });
+
+    if (!userWallet) return null;
+
+    const updated = await this.prisma.user_wallet.update({
+      where: { user_id: userId },
+      data: {
+        rubys: {
+          decrement: 400
+        }
+      }
+    });
+
+    return updated;
+  }
+  async recoverEnergyByRuby(userId: string) {
+    const userWallet = await this.prisma.user_wallet.findUnique({
+      where: { user_id: userId }
+    });
+
+    if (!userWallet) return null;
+
+    const energyToRecover = 10 - (userWallet.energy ?? 0);
+    if (energyToRecover * 50 <= (userWallet.rubys ?? 0)) {
+      const updated = await this.prisma.user_wallet.update({
+        where: { user_id: userId },
+        data: {
+          energy: 10,
+          energy_last_updated: new Date(),
+          rubys: {
+            decrement: energyToRecover * 50
+          }
+        }
+      });
+    }
+    return true;
   }
 }

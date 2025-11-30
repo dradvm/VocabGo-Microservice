@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model difficulty_level {
+  difficulty_level_id   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  difficulty_level_name String           @db.VarChar(100)
+  level_order           Int              @default(0)
+  quest_template        quest_template[]
+}
+
+model monthly_quest {
+  monthly_quest_id String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String           @db.Uuid
+  year             Int
+  month            Int
+  milestone_1      Int              @default(7)
+  milestone_2      Int              @default(15)
+  milestone_3      Int              @default(20)
+  is_claimed_1     Boolean          @default(false)
+  is_claimed_2     Boolean          @default(false)
+  is_claimed_3     Boolean          @default(false)
+  max_point        Int              @default(20)
+  created_at       DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?        @default(now()) @db.Timestamp(6)
+  current_progress Int              @default(0)
+  quest_instance   quest_instance[]
+}
+
+model quest_instance {
+  quest_instance_id String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quest_template_id String?         @db.Uuid
+  assigned_date     DateTime        @default(dbgenerated("CURRENT_DATE")) @db.Date
+  reward_claimed_at DateTime?       @db.Timestamp(6)
+  created_at        DateTime        @default(now()) @db.Timestamp(6)
+  updated_at        DateTime        @default(now()) @db.Timestamp(6)
+  monthly_quest_id  String          @db.Uuid
+  current_value     Int             @default(0)
+  monthly_quest     monthly_quest   @relation(fields: [monthly_quest_id], references: [monthly_quest_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_instance_monthly")
+  quest_template    quest_template? @relation(fields: [quest_template_id], references: [quest_template_id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model quest_template {
+  quest_template_id   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String            @db.VarChar(255)
+  target_value        Int
+  question_id         String?           @db.Uuid
+  reward_type_id      String?           @db.Uuid
+  reward_value        Int
+  quest_type_id       String?           @db.Uuid
+  difficulty_level_id String?           @db.Uuid
+  quest_instance      quest_instance[]
+  difficulty_level    difficulty_level? @relation(fields: [difficulty_level_id], references: [difficulty_level_id], onDelete: NoAction, onUpdate: NoAction)
+  quest_type          quest_type?       @relation(fields: [quest_type_id], references: [quest_type_id], onDelete: NoAction, onUpdate: NoAction)
+  reward_type         reward_type?      @relation(fields: [reward_type_id], references: [reward_type_id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model quest_type {
+  quest_type_id   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quest_type_name String           @db.VarChar(100)
+  quest_template  quest_template[]
+}
+
+model reward_type {
+  reward_type_id   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reward_type_name String           @db.VarChar(100)
+  quest_template   quest_template[]
+}

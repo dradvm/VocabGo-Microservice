@@ -3,14 +3,17 @@ import { AppModule } from './app.module';
 import { ProxyMiddleware } from './proxy.middleware';
 import { JwtVerifyMiddleware } from './jwtverify.middleware';
 import * as morgan from 'morgan';
+import * as express from 'express';
+
+import { ExpressAdapter } from '@nestjs/platform-express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const server = express();
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://26.3.244.182:3000'], // Cho phép FE truy cập
+    origin: ['http://localhost:3000', 'https://vocab-go-web.vercel.app'], // Cho phép FE truy cập
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true // Nếu bạn có gửi cookie/token qua header
+    allowedHeaders: ['Content-Type', 'Authorization']
   });
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   app.use(morgan('dev'));
