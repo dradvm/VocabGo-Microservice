@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import { ProgressService } from './progress.service';
 import {
   DoneLessonRequest,
@@ -85,6 +85,11 @@ export class ProgressController {
     return this.progressService.getUserStreakInfo(payloadToken.sub);
   }
 
+  @Get('streak/userId/:userId')
+  async getUserStreakById(@Param('userId') userId: string) {
+    return this.progressService.getUserStreakInfo(userId);
+  }
+
   @Post('streak/freeze')
   async recoverFreeze(@Req() req: Request) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -116,5 +121,15 @@ export class ProgressController {
       month,
       year
     );
+  }
+
+  @Get('dashboard/overview')
+  async getActivityOverview() {
+    return this.progressService.getActivityOverview();
+  }
+
+  @Get('dashboard/stats')
+  async getActivityStatsByPeriod(@Query('period') period: string) {
+    return this.progressService.getActivityStatsByPeriod(period);
   }
 }

@@ -6,6 +6,7 @@ package user;
 service UserService {
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc CheckEnergy(CheckEnergyRequest) returns (CheckEnergyResponse);
+  rpc GetActiveUsers(GetActiveUsersRequest) returns (GetActiveUsersResponse);
 }
 
 message CreateUserRequest {
@@ -26,4 +27,9 @@ message CheckEnergyRequest {
 
 message CheckEnergyResponse {
   bool hasEnergy = 1;
+}
+message GetActiveUsersRequest {}
+
+message GetActiveUsersResponse {
+  repeated string userIds = 1;
 }

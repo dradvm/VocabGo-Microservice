@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import { QuestService } from './quest.service';
 import { PayloadToken } from 'types/payloadToken';
 
@@ -83,5 +83,15 @@ export class QuestController {
       req.headers['x-user-payload']
     );
     return this.questService.claimMilestoneReward(payloadToken.sub);
+  }
+
+  @Get('dashboard/overview')
+  async getQuestOverview() {
+    return this.questService.getQuestOverview();
+  }
+
+  @Get('dashboard/stats')
+  async getQuestStatsByPeriod(@Query('period') period: string) {
+    return this.questService.getQuestStatsByPeriod(period);
   }
 }

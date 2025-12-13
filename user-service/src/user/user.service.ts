@@ -1,14 +1,27 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
+import { ClientGrpc, ClientProxy } from '@nestjs/microservices';
+import { firstValueFrom, Observable } from 'rxjs';
 import { CreateUserRequest, DoneRequest } from 'src/dto/user.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
+interface AuthService {
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  getActiveUsers(data: {}): Observable<{ userIds: string[] }>;
+}
+
 @Injectable()
 export class UserService {
+  private authService: AuthService;
+
   constructor(
     private readonly prisma: PrismaService,
-    @Inject('PROGRESS_PUBLISHER') private progressClient: ClientProxy
+    @Inject('PROGRESS_PUBLISHER') private progressClient: ClientProxy,
+    @Inject('AUTH_GRPC_SERVICE') private authClientGrpc: ClientGrpc
   ) {}
+  onModuleInit() {
+    this.authService =
+      this.authClientGrpc.getService<AuthService>('AuthService');
+  }
 
   async generatePublicId(given_name: string) {
     // Bỏ dấu tiếng Việt và khoảng trắng
@@ -223,33 +236,19 @@ export class UserService {
 
     return true;
   }
-  async checkMutualFollow(userA: string, userB: string) {
-    const aFollowB = await this.prisma.user_follower.findUnique({
-      where: {
-        user_id_follower_id: {
-          user_id: userB,
-          follower_id: userA
-        }
-      }
-    });
 
-    const bFollowA = await this.prisma.user_follower.findUnique({
-      where: {
-        user_id_follower_id: {
-          user_id: userA,
-          follower_id: userB
-        }
-      }
-    });
-
-    return !!(aFollowB && bFollowA);
-  }
-
-  async getFollowers(userId: string) {
+  async getFollowers(userId: string, currentUserId: string) {
+    const activeUsers = await firstValueFrom(
+      this.authService.getActiveUsers({})
+    );
     const followers = await this.prisma.user_follower.findMany({
-      where: { user_id: userId }
+      where: {
+        user_id: userId,
+        follower_id: {
+          in: activeUsers.userIds
+        }
+      }
     });
-
     return this.prisma.user_profile.findMany({
       where: {
         user_id: {
@@ -258,15 +257,23 @@ export class UserService {
       },
       include: {
         user_follower_user_follower_user_idTouser_profile: {
-          where: { follower_id: userId }
+          where: { follower_id: currentUserId }
         }
       }
     });
   }
 
-  async getFollowings(userId: string) {
+  async getFollowings(userId: string, currentUserId: string) {
+    const activeUsers = await firstValueFrom(
+      this.authService.getActiveUsers({})
+    );
     const followings = await this.prisma.user_follower.findMany({
-      where: { follower_id: userId }
+      where: {
+        follower_id: userId,
+        user_id: {
+          in: activeUsers.userIds
+        }
+      }
     });
     return this.prisma.user_profile.findMany({
       where: {
@@ -276,35 +283,28 @@ export class UserService {
       },
       include: {
         user_follower_user_follower_user_idTouser_profile: {
-          where: { follower_id: userId }
+          where: { follower_id: currentUserId }
         }
       }
     });
   }
 
   async countFollowers(userId: string) {
+    const activeUsers = await firstValueFrom(
+      this.authService.getActiveUsers({})
+    );
     return await this.prisma.user_follower.count({
-      where: { user_id: userId }
+      where: { user_id: userId, follower_id: { in: activeUsers.userIds } }
     });
   }
 
   async countFollowings(userId: string) {
+    const activeUsers = await firstValueFrom(
+      this.authService.getActiveUsers({})
+    );
     return await this.prisma.user_follower.count({
-      where: { follower_id: userId }
+      where: { follower_id: userId, user_id: { in: activeUsers.userIds } }
     });
-  }
-
-  async isFollowing(userId: string, targetId: string) {
-    const exists = await this.prisma.user_follower.findUnique({
-      where: {
-        user_id_follower_id: {
-          user_id: targetId,
-          follower_id: userId
-        }
-      }
-    });
-
-    return !!exists;
   }
 
   async getUsersNotFollowedLoadMore(
@@ -312,11 +312,15 @@ export class UserService {
     search: string = '',
     limit: number = 10
   ) {
+    const activeUsers = await firstValueFrom(
+      this.authService.getActiveUsers({})
+    );
     // Query load dạng "limit", không phân trang
     const users = await this.prisma.user_profile.findMany({
       where: {
         user_id: {
-          notIn: [userId]
+          notIn: [userId],
+          in: activeUsers.userIds.filter((id) => id != userId)
         },
         OR: [{ public_id: { contains: search, mode: 'insensitive' } }]
       },
@@ -371,5 +375,108 @@ export class UserService {
       });
     }
     return true;
+  }
+
+  async getUserOverview() {
+    const totalUsers = await this.prisma.user_profile.count({});
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const usersOneWeekAgo = await this.prisma.user_profile.count({
+      where: {
+        created_at: {
+          lte: oneWeekAgo
+        }
+      }
+    });
+
+    return {
+      currentUsers: totalUsers,
+      oneWeekAgoUsers: usersOneWeekAgo
+    };
+  }
+
+  async getUserStatsByPeriod(period: string) {
+    const now = new Date();
+    const counts: number[] = [];
+
+    if (period === 'day') {
+      const counts: number[] = [];
+      const now = new Date(); // hôm nay
+
+      for (let i = 6; i >= 0; i--) {
+        const day = new Date(now); // clone hôm nay
+        day.setDate(now.getDate() - i); // lùi i ngày
+
+        const start = new Date(
+          day.getFullYear(),
+          day.getMonth(),
+          day.getDate(),
+          0,
+          0,
+          0,
+          0
+        );
+        const end = new Date(
+          day.getFullYear(),
+          day.getMonth(),
+          day.getDate(),
+          23,
+          59,
+          59,
+          999
+        );
+
+        const count = await this.prisma.user_profile.count({
+          where: {
+            created_at: {
+              gte: start,
+              lte: end
+            }
+          }
+        });
+
+        counts.push(count);
+      }
+
+      return counts;
+    } else if (period === 'month') {
+      // 12 tháng trong năm hiện tại
+      const year = now.getFullYear();
+      for (let m = 0; m < 12; m++) {
+        const startMonth = new Date(year, m, 1);
+        const endMonth = new Date(year, m + 1, 1);
+
+        const count = await this.prisma.user_profile.count({
+          where: {
+            created_at: {
+              gte: startMonth,
+              lt: endMonth
+            }
+          }
+        });
+        counts.push(count);
+      }
+    } else if (period === 'year') {
+      // 5 năm gần nhất
+      const startYear = now.getFullYear() - 4;
+      for (let y = startYear; y <= now.getFullYear(); y++) {
+        const start = new Date(y, 0, 1);
+        const end = new Date(y + 1, 0, 1);
+
+        const count = await this.prisma.user_profile.count({
+          where: {
+            created_at: {
+              gte: start,
+              lt: end
+            }
+          }
+        });
+        counts.push(count);
+      }
+    }
+
+    return counts;
   }
 }

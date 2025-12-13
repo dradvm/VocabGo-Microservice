@@ -208,29 +208,37 @@ export class QuestService {
   async doneGameQuests(userId: string, questionId: string) {
     const today = this.getTodayVN();
     const monthlyQuest = await this.getUserMonthlyQuests(userId);
-    const questInstance = await this.prisma.quest_instance.findFirst({
-      where: {
-        monthly_quest_id: monthlyQuest.monthly_quest_id,
-        quest_template: {
-          question_id: questionId
+    const questInstances = (
+      await this.prisma.quest_instance.findMany({
+        where: {
+          monthly_quest_id: monthlyQuest.monthly_quest_id,
+          quest_template: {
+            question_id: questionId
+          },
+          assigned_date: today
         },
-        assigned_date: today
-      },
-      include: {
-        quest_template: true
-      }
-    });
-    if (
-      !questInstance ||
-      questInstance.reward_claimed_at ||
-      !questInstance.quest_template ||
-      questInstance.current_value >= questInstance.quest_template?.target_value
-    ) {
+        include: {
+          quest_template: true
+        }
+      })
+    ).filter(
+      (questInstance) =>
+        questInstance &&
+        !questInstance.reward_claimed_at &&
+        questInstance.current_value <
+          (questInstance.quest_template?.target_value ?? 0)
+    );
+
+    if (questInstances.length == 0) {
       return null;
     }
-    return this.prisma.quest_instance.update({
+    return this.prisma.quest_instance.updateMany({
       where: {
-        quest_instance_id: questInstance.quest_instance_id,
+        quest_instance_id: {
+          in: questInstances.map(
+            (questInstance) => questInstance.quest_instance_id
+          )
+        },
         quest_template: {
           question_id: questionId
         },
@@ -328,5 +336,164 @@ export class QuestService {
     }
 
     return null;
+  }
+
+  async getQuestOverview() {
+    const today = new Date();
+
+    // ----- Tháng hiện tại -----
+    const thisMonthStart = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+    const thisMonthEnd = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+      23,
+      59,
+      59,
+      999
+    );
+
+    // ----- Tháng trước -----
+    const lastMonthStart = new Date(
+      today.getFullYear(),
+      today.getMonth() - 1,
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+    const lastMonthEnd = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      0,
+      23,
+      59,
+      59,
+      999
+    );
+
+    // Lấy tất cả instance tháng hiện tại kèm template
+    const thisMonthQuests = await this.prisma.quest_instance.findMany({
+      where: {
+        created_at: { gte: thisMonthStart, lte: thisMonthEnd }
+      },
+      include: {
+        quest_template: true
+      }
+    });
+
+    // Lấy tất cả instance tháng trước kèm template
+    const lastMonthQuests = await this.prisma.quest_instance.findMany({
+      where: {
+        created_at: { gte: lastMonthStart, lte: lastMonthEnd }
+      },
+      include: {
+        quest_template: true
+      }
+    });
+
+    // Hàm tính tỉ lệ hoàn thành
+    const calcRate = (quests: any[]) => {
+      const total = quests.length;
+      if (total === 0) return 0;
+
+      const completed = quests.filter(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        (q) => q.current_value >= q.quest_template.target_value
+      ).length;
+
+      return (completed / total) * 100;
+    };
+
+    const thisMonthRate = calcRate(thisMonthQuests);
+    const lastMonthRate = calcRate(lastMonthQuests);
+
+    return {
+      thisMonthRate: Number(thisMonthRate.toFixed(1)),
+      lastMonthRate: Number(lastMonthRate.toFixed(1))
+    };
+  }
+
+  async getQuestStatsByPeriod(period: string) {
+    const now = new Date();
+    const results: number[] = [];
+
+    // Hàm tính tỉ lệ hoàn thành (%)
+    const calcRate = (quests: any[]) => {
+      const total = quests.length;
+      if (total === 0) return 0;
+
+      const completed = quests.filter(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        (q) => q.current_value >= q.quest_template.target_value
+      ).length;
+
+      return Number(((completed / total) * 100).toFixed(1));
+    };
+
+    if (period === 'day') {
+      for (let i = 6; i >= 0; i--) {
+        const dayStart = new Date(now);
+        dayStart.setHours(0, 0, 0, 0);
+        dayStart.setDate(now.getDate() - i);
+
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayStart.getDate() + 1);
+
+        const quests = await this.prisma.quest_instance.findMany({
+          where: {
+            created_at: { gte: dayStart, lt: dayEnd }
+          },
+          include: { quest_template: true }
+        });
+
+        results.push(calcRate(quests));
+      }
+
+      return results;
+    } else if (period === 'month') {
+      const year = now.getFullYear();
+
+      for (let month = 0; month < 12; month++) {
+        const startMonth = new Date(year, month, 1, 0, 0, 0, 0);
+        const endMonth = new Date(year, month + 1, 1, 0, 0, 0, 0);
+
+        const quests = await this.prisma.quest_instance.findMany({
+          where: {
+            created_at: { gte: startMonth, lt: endMonth }
+          },
+          include: { quest_template: true }
+        });
+
+        results.push(calcRate(quests));
+      }
+    } else if (period === 'year') {
+      const startYear = now.getFullYear() - 4;
+
+      for (let y = startYear; y <= now.getFullYear(); y++) {
+        const start = new Date(y, 0, 1, 0, 0, 0, 0);
+        const end = new Date(y + 1, 0, 1, 0, 0, 0, 0);
+
+        const quests = await this.prisma.quest_instance.findMany({
+          where: {
+            created_at: { gte: start, lt: end }
+          },
+          include: { quest_template: true }
+        });
+
+        results.push(calcRate(quests));
+      }
+    }
+
+    return results;
   }
 }

@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package auth;
+
+
+service AuthService {
+  rpc GetActiveUsers(GetActiveUsersRequest) returns (GetActiveUsersResponse);
+}
+
+message GetActiveUsersRequest {}
+
+message GetActiveUsersResponse {
+  repeated string userIds = 1;
+}

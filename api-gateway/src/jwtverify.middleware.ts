@@ -22,6 +22,7 @@ export function JwtVerifyMiddleware(secret: string | undefined) {
       const payload: PayloadToken = jwt.verify<PayloadToken>(token, secret);
       // gắn payload vào request, các service phía sau có thể dùng nếu muốn
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (payload.status == 'banned') return res.status(403);
       req.headers['x-user-payload'] = JSON.stringify(payload);
       next();
     } catch (err) {

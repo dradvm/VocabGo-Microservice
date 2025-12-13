@@ -475,25 +475,38 @@ export class VocabularyService {
     });
   }
 
-  async getWords(page: number = 0, limit: number = 10, search: string = '') {
+  async getWords(
+    page: number = 0,
+    limit: number = 10,
+    search: string = '',
+    categories: string[]
+  ) {
     const skip = page * limit;
 
-    // Tạo điều kiện tìm kiếm
-    const where = search
-      ? {
-          OR: [
-            { word: { contains: search, mode: Prisma.QueryMode.insensitive } }, // tìm trong trường "word"
-            {
-              meaning_vi: {
-                contains: search,
-                mode: Prisma.QueryMode.insensitive
+    const where = {
+      ...(search && {
+        OR: [
+          { word: { contains: search, mode: Prisma.QueryMode.insensitive } },
+          {
+            meaning_vi: { contains: search, mode: Prisma.QueryMode.insensitive }
+          }
+        ]
+      }),
+      ...(categories &&
+        categories.length > 0 && {
+          word_pos: {
+            some: {
+              category_word_pos: {
+                some: {
+                  category_id: {
+                    in: categories
+                  }
+                }
               }
-            } // nếu có trường "meaning"
-          ]
-        }
-      : {};
-
-    // Chạy song song để lấy danh sách và tổng số kết quả
+            }
+          }
+        })
+    };
     const [data, total] = await Promise.all([
       this.prisma.words.findMany({
         where,
@@ -901,5 +914,42 @@ export class VocabularyService {
     return this.prisma.words.delete({
       where: { word_id: wordId }
     });
+  }
+
+  async exportCsv() {
+    const wordPos = await this.prisma.word_pos.findMany({
+      include: {
+        words: true,
+        word_example: true,
+        pos_tags: true,
+        levels: true,
+        category_word_pos: {
+          include: {
+            categories: true
+          }
+        }
+      }
+    });
+    const words = wordPos.map((wp) => {
+      return {
+        word: wp.words?.word,
+        phonetic: wp.words?.phonetic,
+        meaning_vi: wp.words?.meaning_vi,
+        definition: wp.definition,
+        image: wp.image,
+        audio: wp.words?.audio,
+        pos_tag: wp.pos_tags?.pos_tag,
+        level: wp.levels?.level_name,
+        categories: wp.category_word_pos
+          .map((cwp) => cwp.categories.category_name)
+          .join('; '),
+        examples: wp.word_example.map((we) => we.example).join('; ')
+      };
+    });
+    return words;
+  }
+
+  async getWordOverview() {
+    return this.prisma.words.count({});
   }
 }

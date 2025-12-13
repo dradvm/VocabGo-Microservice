@@ -11,7 +11,11 @@ async function bootstrap() {
   const server = express();
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
   app.enableCors({
-    origin: ['http://localhost:3000', 'https://vocab-go-web.vercel.app'], // Cho phép FE truy cập
+    origin: [
+      'http://localhost:3000',
+      'https://vocab-go-web.vercel.app',
+      'http://192.168.1.32:3000'
+    ], // Cho phép FE truy cập
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
   });

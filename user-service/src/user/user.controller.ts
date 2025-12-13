@@ -64,6 +64,11 @@ export class UserController {
     return this.userService.getProfile(payloadToken.sub);
   }
 
+  @Post('profile/:userId')
+  async getProfileById(@Param('userId') userId: string) {
+    return this.userService.getProfile(userId);
+  }
+
   // 1. FOLLOW
   @Post('follow')
   async follow(@Body() body: { followingId: string }, @Req() req: Request) {
@@ -75,22 +80,22 @@ export class UserController {
     return await this.userService.follow(payloadToken.sub, followingId);
   }
 
-  @Get('mutual')
-  async checkMutualFollow(
-    @Query('userA') userA: string,
-    @Query('userB') userB: string
-  ) {
-    return await this.userService.checkMutualFollow(userA, userB);
-  }
-
   @Get(':userId/followers')
-  async getFollowers(@Param('userId') userId: string) {
-    return await this.userService.getFollowers(userId);
+  async getFollowers(@Param('userId') userId: string, @Req() req: Request) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const payloadToken: PayloadToken = JSON.parse(
+      req.headers['x-user-payload']
+    );
+    return await this.userService.getFollowers(userId, payloadToken.sub);
   }
 
   @Get(':userId/followings')
-  async getFollowings(@Param('userId') userId: string) {
-    return await this.userService.getFollowings(userId);
+  async getFollowings(@Param('userId') userId: string, @Req() req: Request) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const payloadToken: PayloadToken = JSON.parse(
+      req.headers['x-user-payload']
+    );
+    return await this.userService.getFollowings(userId, payloadToken.sub);
   }
 
   @Get(':userId/followers/count')
@@ -126,7 +131,10 @@ export class UserController {
     const payloadToken: PayloadToken = JSON.parse(
       req.headers['x-user-payload']
     );
-    return await this.userService.getFollowers(payloadToken.sub);
+    return await this.userService.getFollowers(
+      payloadToken.sub,
+      payloadToken.sub
+    );
   }
 
   @Get('followings')
@@ -135,7 +143,10 @@ export class UserController {
     const payloadToken: PayloadToken = JSON.parse(
       req.headers['x-user-payload']
     );
-    return await this.userService.getFollowings(payloadToken.sub);
+    return await this.userService.getFollowings(
+      payloadToken.sub,
+      payloadToken.sub
+    );
   }
 
   @Get('followers/count')
@@ -162,5 +173,15 @@ export class UserController {
       req.headers['x-user-payload']
     );
     return this.userService.recoverEnergyByRuby(payloadToken.sub);
+  }
+
+  @Get('dashboard/overview')
+  async getUserOverview() {
+    return this.userService.getUserOverview();
+  }
+
+  @Get('dashboard/stats')
+  async getUserStatsByPeriod(@Query('period') period: string) {
+    return this.userService.getUserStatsByPeriod(period);
   }
 }

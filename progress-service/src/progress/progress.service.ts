@@ -542,4 +542,95 @@ export class ProgressService implements OnModuleInit {
       }
     });
   }
+
+  async getActivityOverview() {
+    const today = new Date();
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+
+    const activeUsers = await this.prisma.streak_day.count({
+      where: {
+        is_frozen: false,
+        activity_date: {
+          gte: start,
+          lte: end
+        }
+      }
+    });
+    return activeUsers;
+  }
+
+  async getActivityStatsByPeriod(period: string) {
+    const now = new Date();
+    const counts: number[] = [];
+
+    if (period === 'day') {
+      const counts: number[] = [];
+      const now = new Date();
+
+      for (let i = 6; i >= 0; i--) {
+        const day = new Date(now);
+        day.setDate(now.getDate() - i);
+
+        const nextDay = new Date(day);
+        nextDay.setDate(day.getDate() + 1);
+
+        const count = await this.prisma.streak_day.count({
+          where: {
+            is_frozen: false,
+            activity_date: {
+              gte: day,
+              lt: nextDay // < ngày tiếp theo
+            }
+          }
+        });
+        counts.push(count);
+      }
+
+      return counts;
+    } else if (period === 'month') {
+      // 12 tháng trong năm hiện tại
+      const year = now.getFullYear();
+
+      for (let m = 0; m < 12; m++) {
+        const startMonth = new Date(year, m, 1);
+        const endMonth = new Date(year, m + 1, 1);
+
+        const grouped = await this.prisma.streak_day.groupBy({
+          by: ['user_id'],
+          where: {
+            is_frozen: false,
+            activity_date: { gte: startMonth, lt: endMonth }
+          }
+        });
+
+        counts.push(grouped.length); // số user khác nhau trong tháng
+      }
+    } else if (period === 'year') {
+      const startYear = now.getFullYear() - 4;
+
+      for (let y = startYear; y <= now.getFullYear(); y++) {
+        const start = new Date(y, 0, 1);
+        const end = new Date(y + 1, 0, 1);
+
+        const grouped = await this.prisma.streak_day.groupBy({
+          by: ['user_id'],
+          where: {
+            is_frozen: false,
+            activity_date: {
+              gte: start,
+              lt: end
+            }
+          }
+        });
+
+        counts.push(grouped.length);
+      }
+    }
+
+    return counts;
+  }
 }

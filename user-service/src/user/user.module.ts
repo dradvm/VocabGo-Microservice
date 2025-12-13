@@ -3,6 +3,7 @@ import { PrismaModule } from 'src/prisma/prisma.module';
 import { UserService } from './user.service';
 import { UserController } from './user.controller';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { join } from 'path';
 
 @Module({
   imports: [
@@ -15,6 +16,15 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
           urls: ['amqp://localhost:5672'],
           queue: 'progress_queue',
           queueOptions: { durable: true }
+        }
+      },
+      {
+        name: 'AUTH_GRPC_SERVICE', // 👈 tên để inject
+        transport: Transport.GRPC,
+        options: {
+          package: 'auth',
+          protoPath: join(process.cwd(), 'proto/auth.proto'),
+          url: 'localhost:50051' // 👈 trỏ tới user_service
         }
       }
     ])

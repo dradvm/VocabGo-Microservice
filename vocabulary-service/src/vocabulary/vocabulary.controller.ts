@@ -10,7 +10,8 @@ import {
   Param,
   Patch,
   UploadedFiles,
-  Delete
+  Delete,
+  Res
 } from '@nestjs/common';
 import {
   FileFieldsInterceptor,
@@ -24,7 +25,8 @@ import {
   AudioCloudinary,
   ImageCloudinary
 } from 'types/word';
-
+import { format } from 'fast-csv';
+import { Response } from 'express';
 @Controller('')
 export class VocabularyController {
   constructor(private readonly vocabularyService: VocabularyService) {}
@@ -55,13 +57,19 @@ export class VocabularyController {
     return this.vocabularyService.getWordsByWordPosIds(wordPosIds);
   }
 
-  @Get('words')
+  @Post('words/search')
   async getWords(
-    @Query('page') page = 1,
-    @Query('limit') limit = 10,
-    @Query('search') search = ''
+    @Body('page') page = 1,
+    @Body('limit') limit = 10,
+    @Body('search') search = '',
+    @Body('categories') categories = []
   ) {
-    return this.vocabularyService.getWords(Number(page), Number(limit), search);
+    return this.vocabularyService.getWords(
+      Number(page),
+      Number(limit),
+      search,
+      categories
+    );
   }
 
   @Get('words/:wordId')
@@ -151,5 +159,54 @@ export class VocabularyController {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const token = req.headers.authorization?.replace('Bearer ', '');
     return this.vocabularyService.deleteWord(wordId, token);
+  }
+
+  @Get('export-csv')
+  async exportCsv(@Res() res: Response) {
+    const words = await this.vocabularyService.exportCsv();
+
+    const headers = [
+      'Word',
+      'Phonetic',
+      'Meaning VI',
+      'Definition',
+      'POS Tag',
+      'Level',
+      'Categories',
+      'Examples',
+      'Image',
+      'Audio'
+    ];
+
+    const rows = words.map((w) =>
+      [
+        w.word,
+        w.phonetic,
+        w.meaning_vi,
+        w.definition,
+        w.pos_tag,
+        w.level,
+        w.categories,
+        w.examples,
+        w.image,
+        w.audio
+      ]
+        .map((field) => `"${(field ?? '').toString().replace(/"/g, '""')}"`) // escape dấu "
+        .join(',')
+    );
+    const bom = '\uFEFF'; // UTF-8 BOM để Excel đọc đúng tiếng Việt
+    const csv = bom + [headers.join(','), ...rows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=UTF-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="vocabulary.csv"'
+    );
+    res.send(csv);
+  }
+
+  @Get('dashboard/overview')
+  async getWordOverview() {
+    return this.vocabularyService.getWordOverview();
   }
 }

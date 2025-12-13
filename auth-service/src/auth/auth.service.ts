@@ -7,14 +7,18 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { ClientGrpc } from '@nestjs/microservices';
-import { auth_providers, auth_sessions, auth_users } from '@prisma/client';
+import {
+  auth_providers,
+  auth_sessions,
+  auth_users,
+  Prisma
+} from '@prisma/client';
 import { TokenPayload } from 'google-auth-library';
 import { StringValue } from 'ms';
 import * as ms from 'ms';
 import { Observable } from 'rxjs';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PayloadToken } from 'src/types/payloadToken';
-import bcrypt from 'bcrypt';
 import { compareToken, hashToken } from 'src/utils/bcrypt';
 interface UserService {
   createUser(data: {
@@ -74,7 +78,7 @@ export class AuthService implements OnModuleInit {
     tokenPayload: TokenPayload
   ): Promise<auth_users> {
     const auth_user = await this.prisma.auth_users.create({
-      data: { primary_email: payload.email }
+      data: { primary_email: payload.email, last_login_at: new Date() }
     });
     if (
       tokenPayload.picture &&
@@ -199,10 +203,20 @@ export class AuthService implements OnModuleInit {
         throw new Error('Session expired');
       }
 
+      const user = await this.prisma.auth_users.findUnique({
+        where: {
+          id: session.auth_user_id
+        }
+      });
+
+      if (!user) {
+        throw new Error('User not found');
+      }
+
       const payloadToken: PayloadToken = {
         sub: payload.sub,
         role: payload.role,
-        status: payload.status
+        status: user?.status ?? 'banned'
       };
 
       const newAccessToken = this.getToken('ACCESS', payloadToken);
@@ -245,9 +259,9 @@ export class AuthService implements OnModuleInit {
     return newAdmin;
   }
 
-  async loginAdmin(username: string, password: string) {
+  async loginAdmin(email: string, password: string) {
     const user = await this.prisma.auth_users.findUnique({
-      where: { username: username }
+      where: { primary_email: email }
     });
 
     if (!user) {
@@ -296,5 +310,81 @@ export class AuthService implements OnModuleInit {
         is_revoked: true
       }
     });
+  }
+
+  async getUsers(page: number = 0, limit: number = 10, search: string = '') {
+    const skip = page * limit;
+
+    // Điều kiện WHERE cho tìm kiếm
+    const where = search
+      ? {
+          OR: [
+            {
+              primary_email: {
+                contains: search,
+                mode: Prisma.QueryMode.insensitive
+              }
+            }
+          ]
+        }
+      : {};
+
+    // Chạy song song lấy danh sách + tổng số
+    const [data, total] = await Promise.all([
+      this.prisma.auth_users.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' }, // Người mới đăng ký hiển thị trước
+        select: {
+          id: true,
+          primary_email: true,
+          role: true,
+          status: true,
+          last_login_at: true
+        }
+      }),
+      this.prisma.auth_users.count({ where })
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  async toggleStatus(userId: string) {
+    const user = await this.prisma.auth_users.findUnique({
+      where: {
+        id: userId
+      }
+    });
+    if (!user) {
+      return null;
+    }
+    return this.prisma.auth_users.update({
+      where: {
+        id: userId
+      },
+      data: {
+        status: user.status == 'active' ? 'banned' : 'active'
+      }
+    });
+  }
+
+  async getActiveUsers() {
+    const users = await this.prisma.auth_users.findMany({
+      where: {
+        status: 'active',
+        role: 'user'
+      },
+      select: {
+        id: true
+      }
+    });
+    return users.map((user) => user.id);
   }
 }

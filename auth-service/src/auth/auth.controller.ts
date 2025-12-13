@@ -1,10 +1,14 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Headers,
   Inject,
+  Param,
+  Patch,
   Post,
+  Query,
   Req,
   Res
 } from '@nestjs/common';
@@ -13,6 +17,7 @@ import { AuthService } from './auth.service';
 import { OAuth2Client } from 'google-auth-library';
 import { Request, Response } from 'express';
 import { auth_sessions } from '@prisma/client';
+import { GrpcMethod } from '@nestjs/microservices';
 
 @Controller('')
 export class AuthController {
@@ -47,7 +52,7 @@ export class AuthController {
       req.connection.remoteAddress) as string;
     if (user != null) {
       if (user.status === 'banned') {
-        return { status: 'error', message: 'User is banned' };
+        throw new ForbiddenException('Người dùng bị cấm');
       }
       const provider = await this.authService.isAuthProviderExist({
         provider: 'google',
@@ -199,5 +204,25 @@ export class AuthController {
   @Post('logout')
   async logout(@Body('refreshToken') refreshToken: string) {
     return this.authService.logout(refreshToken);
+  }
+
+  @Get('users')
+  async getUsers(
+    @Query('page') page = 1,
+    @Query('limit') limit = 10,
+    @Query('search') search = ''
+  ) {
+    return this.authService.getUsers(Number(page), Number(limit), search);
+  }
+  @Patch('toggleStatus/:userId')
+  async toggleStatus(@Param('userId') userId: string) {
+    return this.authService.toggleStatus(userId);
+  }
+
+  @GrpcMethod('AuthService', 'GetActiveUsers')
+  async getActiveUsers(_: any) {
+    return {
+      userIds: await this.authService.getActiveUsers()
+    };
   }
 }
